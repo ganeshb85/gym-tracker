@@ -448,26 +448,53 @@ function greet() { const h=S.today.getHours(); return h<12?'Good morning':h<17?'
 
 // FACE ID
 async function doFaceID() {
-  const btn=document.getElementById('fid-btn');
+  const btn = document.getElementById('fid-btn');
   btn.classList.add('scanning');
   try {
-    const stored=localStorage.getItem('gymlog_cred');
-    if(stored&&window.PublicKeyCredential) {
-      const ch=new Uint8Array(32); crypto.getRandomValues(ch);
-      await navigator.credentials.get({publicKey:{
-        challenge:ch,
-        rpId:location.hostname||'localhost',
-        allowCredentials:[{type:'public-key',id:Uint8Array.from(atob(stored),c=>c.charCodeAt(0))}],
-        userVerification:'required',timeout:10000
-      }});
-    } else { await new Promise(r=>setTimeout(r,1200)); }
+    const available = window.PublicKeyCredential &&
+      await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().catch(() => false);
+    if (available) {
+      const stored = localStorage.getItem('gymlog_cred');
+      const ch = crypto.getRandomValues(new Uint8Array(32));
+      if (!stored) {
+        const cred = await navigator.credentials.create({ publicKey: {
+          challenge: ch,
+          rp: { name: 'GymLog', id: location.hostname },
+          user: { id: new Uint8Array(16), name: 'user', displayName: 'GymLog User' },
+          pubKeyCredParams: [{ alg: -7, type: 'public-key' }],
+          authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
+          timeout: 30000,
+        }});
+        const rawId = new Uint8Array(cred.rawId);
+        localStorage.setItem('gymlog_cred', btoa(String.fromCharCode(...rawId)));
+      } else {
+        const credId = Uint8Array.from(atob(stored), c => c.charCodeAt(0));
+        await navigator.credentials.get({ publicKey: {
+          challenge: ch,
+          rpId: location.hostname,
+          allowCredentials: [{ type: 'public-key', id: credId }],
+          userVerification: 'required',
+          timeout: 30000,
+        }});
+      }
+    } else {
+      await new Promise(r => setTimeout(r, 900));
+    }
     unlockApp();
-  } catch(e) { await new Promise(r=>setTimeout(r,1200)); unlockApp(); }
+  } catch(e) {
+    console.log('FaceID:', e.name, e.message);
+    await new Promise(r => setTimeout(r, 600));
+    unlockApp();
+  }
 }
 
 function unlockApp() {
-  document.getElementById('fid-btn').classList.remove('scanning');
-  document.getElementById('lock').style.display='none';
+  const lock = document.getElementById('lock');
+  lock.classList.remove('active');
+  lock.style.display = 'none';
+  document.querySelectorAll('.screen').forEach(s => { s.classList.remove('active'); s.style.display = ''; });
+  const home = document.getElementById('screen-home');
+  if (home) { home.classList.add('active'); home.style.display = 'flex'; }
   initApp();
 }
 
