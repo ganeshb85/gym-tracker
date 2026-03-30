@@ -16,7 +16,7 @@
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;background:var(--bg);font-family:var(--sans);color:var(--text);overscroll-behavior:none;-webkit-font-smoothing:antialiased}
 #app{display:flex;flex-direction:column;height:100vh;height:100dvh;max-width:430px;margin:0 auto;position:relative;overflow:hidden;padding-top:var(--safe-t)}
-.screen{display:none;flex-direction:column;flex:1;overflow:hidden}.screen.active{display:flex}
+.screen{display:none;flex-direction:column;position:absolute;inset:0;overflow:hidden}.screen.active{display:flex}
 .scroll{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding-bottom:calc(var(--nav-h) + var(--safe-b) + 20px)}.scroll::-webkit-scrollbar{display:none}
 .nav{position:absolute;bottom:0;left:0;right:0;height:calc(var(--nav-h) + var(--safe-b));background:rgba(255,255,255,.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:.5px solid var(--border);display:flex;align-items:flex-start;padding-top:6px;padding-bottom:var(--safe-b);z-index:50}
 .ni{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;opacity:.4;transition:opacity .15s;padding-top:2px}.ni.on{opacity:1}
@@ -141,7 +141,7 @@ html,body{height:100%;background:var(--bg);font-family:var(--sans);color:var(--t
 </head>
 <body>
 <div id="app">
-  <div class="screen active" id="lock" style="display:flex!important">
+  <div class="screen active" id="lock" style="display:flex!important;z-index:90">
     <div class="lock-logo">
       <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
         <rect x="8" y="16" width="24" height="18" rx="4" fill="#007aff" opacity=".15"/>
@@ -423,6 +423,7 @@ async function doFaceID(){
 }
 
 function unlockApp(){
+  sessionStorage.setItem('gymlog_unlocked','1');
   const lock=document.getElementById('lock');
   lock.classList.remove('active');lock.style.display='none';
   document.querySelectorAll('.screen').forEach(s=>{s.classList.remove('active');s.style.display='';});
@@ -437,6 +438,26 @@ async function initApp(){
   if('serviceWorker'in navigator)navigator.serviceWorker.register('/gym-tracker/sw.js',{scope:'/gym-tracker/'}).catch(()=>{});
   checkFaceIDStatus();
   if(new URLSearchParams(location.search).get('action')==='export')showExportPreview();
+  restoreActiveSession();
+}
+
+function restoreActiveSession(){
+  try{
+    const saved=localStorage.getItem('gymlog_active_session');
+    if(!saved)return;
+    const{dayKey,exIdx,log,sel,startTime}=JSON.parse(saved);
+    if(!PLANS[dayKey])return;
+    const plan=PLANS[dayKey];
+    const dow=S.today.getDay(),curDk={1:'Mon',3:'Wed',5:'Fri'}[dow];
+    S.activeSession={plan,dayKey,plannedDay:dayKey!==curDk?DAYS_LONG[{Mon:1,Wed:3,Fri:5}[dayKey]]:null,log,sel,startTime};
+    S.exIdx=exIdx||0;
+    document.getElementById('wo-title').textContent=plan.label;
+    document.getElementById('wo-sub').textContent=S.activeSession.plannedDay?`${S.activeSession.plannedDay} plan · resumed`:fmtDate(S.today)+' · resumed';
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    document.getElementById('screen-workout').classList.add('active');
+    renderExercise();
+    showToast('Workout resumed ✓');
+  }catch(e){localStorage.removeItem('gymlog_active_session');}
 }
 
 async function loadSettings(){
@@ -618,7 +639,11 @@ function renderExercise(){
 function pickRep(r){S.activeSession.sel[S.exIdx]=r;renderExercise();}
 function prevEx(){if(S.exIdx>0){S.exIdx--;renderExercise();}}
 function nextEx(){if(S.exIdx<S.activeSession.plan.exercises.length-1){S.exIdx++;renderExercise();}else saveAndShowDone();}
-function logSet(i){S.activeSession.log[S.exIdx][i]=S.activeSession.sel[S.exIdx];renderExercise();const allComplete=S.activeSession.plan.exercises.every((_,idx)=>S.activeSession.log[idx].every(s=>s!==null));if(allComplete)setTimeout(saveAndShowDone,300);}
+function persistSession(){
+  if(!S.activeSession)return;
+  try{localStorage.setItem('gymlog_active_session',JSON.stringify({dayKey:S.activeSession.dayKey,exIdx:S.exIdx,log:S.activeSession.log,sel:S.activeSession.sel,startTime:S.activeSession.startTime}));}catch(e){}
+}
+function logSet(i){S.activeSession.log[S.exIdx][i]=S.activeSession.sel[S.exIdx];persistSession();renderExercise();const allComplete=S.activeSession.plan.exercises.every((_,idx)=>S.activeSession.log[idx].every(s=>s!==null));if(allComplete)setTimeout(saveAndShowDone,300);}
 
 async function saveAndShowDone(){
   const{plan,log,startTime,plannedDay,dayKey}=S.activeSession;
@@ -637,6 +662,7 @@ async function saveAndShowDone(){
     if(setRows.length)await db.from('set_logs').insert(setRows);
     S.lastSessionData={...sess,sets:setRows,kcal,streak,totalReps,totalSets:allSets.length};
   }
+  localStorage.removeItem('gymlog_active_session');
   showDone();
 }
 
@@ -654,6 +680,7 @@ function showDone(){
 function finishSession(){
   document.getElementById('done').classList.remove('show');
   S.activeSession=null;
+  localStorage.removeItem('gymlog_active_session');
   loadData().then(renderHome);
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-home').classList.add('active');
@@ -727,6 +754,9 @@ async function requestPush(){if(!('Notification'in window)){showToast('Push not 
 
 let toastT;
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),3000);}
+
+// Auto-skip lock screen if already unlocked this browser session
+if(sessionStorage.getItem('gymlog_unlocked')==='1'){unlockApp();}
 </script>
 </body>
 </html>
