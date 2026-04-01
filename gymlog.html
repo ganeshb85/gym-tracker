@@ -294,6 +294,7 @@ html,body{height:100%;background:var(--bg);font-family:var(--sans);color:var(--t
     <div class="exp-actions"><button class="btn-primary" onclick="copyMD()">Copy markdown</button><button class="btn-secondary" onclick="saveMD()">Save to iCloud</button></div>
   </div>
   <div id="toast"></div>
+  <div id="debug-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#1c1c1e;color:#ff453a;font-size:11px;padding:8px 12px;z-index:999;font-family:monospace;word-break:break-all;white-space:pre-wrap;max-height:120px;overflow-y:auto"></div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
@@ -479,10 +480,11 @@ async function loadData(){
     S.sessions=data||[];
     S.streak=calcStreak(S.sessions);
   }catch(e){
-    console.error('loadData failed:',e);
+    const msg=e?.message||e?.error_description||JSON.stringify(e)||'unknown';
+    console.error('loadData failed:',msg);
     S.sessions=[];
     S.streak=0;
-    showToast('Could not load sessions — check connection');
+    showToast('Load failed: '+msg);
   }
 }
 
@@ -496,7 +498,7 @@ function calcStreak(sessions){
 
 function switchTab(tab){
   if(S.activeSession&&tab!=='workout'){
-    if(!S._pendingTab){
+    if(S._pendingTab!==tab){
       S._pendingTab=tab;
       showToast('Tap again to leave (progress saved)');
       setTimeout(()=>{S._pendingTab=null;},3000);
@@ -648,21 +650,53 @@ async function startFromPicker(){
 }
 
 async function logCustomActivity(act){
-  const kcal=calcKcal(act.met,S.pickerDur);
-  const{data:existing}=await db.from('workout_sessions').select('session_date').order('session_date',{ascending:false});
-  const streak=calcStreak(existing||[])+1;
-  const{data,error}=await db.from('workout_sessions').insert({session_date:todayISO(),day_name:DAYS_SH[S.today.getDay()],workout_type:act.type,workout_label:act.name,workout_category:'custom',total_sets:0,total_reps:0,calories_kcal:kcal,duration_min:S.pickerDur,streak_at_time:streak,planned_day:null,logged_day:DAYS_SH[S.today.getDay()],off_plan:false}).select().single();
-  if(!error&&data){S.lastSessionData={...data,kcal,streak};showDone();}
-  else showToast('Error saving session');
+  try{
+    const kcal=calcKcal(act.met,S.pickerDur);
+    const streak=calcStreak(S.sessions)+1;
+    const{data,error}=await db.from('workout_sessions').insert({
+      session_date:todayISO(),
+      day_name:DAYS_SH[S.today.getDay()],
+      workout_type:act.type,
+      workout_label:act.name,
+      workout_category:'custom',
+      total_sets:0,
+      total_reps:0,
+      calories_kcal:kcal,
+      duration_min:S.pickerDur,
+      streak_at_time:streak,
+      planned_day:null,
+      logged_day:DAYS_SH[S.today.getDay()],
+      off_plan:false
+    }).select().single();
+    if(error||!data)throw new Error(error?.message||'Insert returned no data');
+    S.lastSessionData={...data,kcal,streak};
+    showDone();
+  }catch(e){
+    const msg=e?.message||e?.error_description||JSON.stringify(e)||'unknown';
+    console.error('logCustomActivity error:',msg);
+    showToast('Save failed: '+msg);
+  }
 }
 
 function startGymSession(dk){
+  // If there's a saved session for this same plan, resume it instead of starting fresh
+  try{
+    const saved=localStorage.getItem('gymlog_active_session');
+    if(saved){
+      const parsed=JSON.parse(saved);
+      if(parsed.dayKey===dk){
+        const resumed=restoreActiveSession();
+        if(resumed)return;
+      }
+    }
+  }catch(e){}
   const plan=PLANS[dk];
   const dow=S.today.getDay(),curDk={1:'Mon',3:'Wed',5:'Fri'}[dow];
   const log={},sel={};
   plan.exercises.forEach((ex,i)=>{log[i]=new Array(ex.sets).fill(null);sel[i]=ex.def;});
   S.activeSession={plan,dayKey:dk,plannedDay:dk!==curDk?DAYS_LONG[{Mon:1,Wed:3,Fri:5}[dk]]:null,log,sel,startTime:Date.now()};
   S.exIdx=0;
+  persistSession();
   document.getElementById('wo-title').textContent=plan.label;
   document.getElementById('wo-sub').textContent=S.activeSession.plannedDay?`${S.activeSession.plannedDay} plan · logged ${fmtDate(S.today)}`:fmtDate(S.today);
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
@@ -695,7 +729,7 @@ function renderExercise(){
 
 function pickRep(r){S.activeSession.sel[S.exIdx]=r;renderExercise();}
 function prevEx(){if(S.exIdx>0){S.exIdx--;renderExercise();}}
-function nextEx(){if(S.exIdx<S.activeSession.plan.exercises.length-1){S.exIdx++;renderExercise();}else saveAndShowDone();}
+function nextEx(){if(S.exIdx<S.activeSession.plan.exercises.length-1){S.exIdx++;persistSession();renderExercise();}else saveAndShowDone();}
 function persistSession(){
   if(!S.activeSession)return;
   try{localStorage.setItem('gymlog_active_session',JSON.stringify({dayKey:S.activeSession.dayKey,exIdx:S.exIdx,log:S.activeSession.log,sel:S.activeSession.sel,startTime:S.activeSession.startTime}));}catch(e){}
@@ -705,31 +739,54 @@ function logSet(i){S.activeSession.log[S.exIdx][i]=S.activeSession.sel[S.exIdx];
 async function saveAndShowDone(){
   if(S._isSaving)return;
   S._isSaving=true;
-  const{plan,log,startTime,plannedDay,dayKey}=S.activeSession;
-  const allSets=Object.values(log).flat().filter(x=>x!==null);
-  const totalReps=allSets.reduce((a,b)=>a+(b||0),0);
-  const durationMin=Math.max(Math.round((Date.now()-startTime)/60000),10);
-  const kcal=calcKcal(plan.met,durationMin);
-  const dow=S.today.getDay(),curDk={1:'Mon',3:'Wed',5:'Fri'}[dow];
-  const offPlan=dayKey!==curDk;
-  const{data:existing}=await db.from('workout_sessions').select('session_date').order('session_date',{ascending:false});
-  const streak=calcStreak(existing||[])+1;
-  const{data:sess,error}=await db.from('workout_sessions').insert({session_date:todayISO(),day_name:DAYS_SH[S.today.getDay()],workout_type:plan.type,workout_label:plan.label,workout_category:'gym',total_sets:allSets.length,total_reps:totalReps,calories_kcal:kcal,duration_min:durationMin,streak_at_time:streak,planned_day:plannedDay||null,logged_day:DAYS_SH[S.today.getDay()],off_plan:offPlan}).select().single();
-  if(!error&&sess){
+  try{
+    const{plan,log,startTime,plannedDay,dayKey}=S.activeSession;
+    const allSets=Object.values(log).flat().filter(x=>x!==null);
+    const totalReps=allSets.reduce((a,b)=>a+(b||0),0);
+    const durationMin=Math.max(Math.round((Date.now()-startTime)/60000),10);
+    const kcal=calcKcal(plan.met,durationMin);
+    const dow=S.today.getDay(),curDk={1:'Mon',3:'Wed',5:'Fri'}[dow];
+    const offPlan=dayKey!==curDk;
+    const streak=calcStreak(S.sessions)+1;
+    const{data:sess,error}=await db.from('workout_sessions').insert({
+      session_date:todayISO(),
+      day_name:DAYS_SH[S.today.getDay()],
+      workout_type:plan.type,
+      workout_label:plan.label,
+      workout_category:'gym',
+      total_sets:allSets.length,
+      total_reps:totalReps,
+      calories_kcal:kcal,
+      duration_min:durationMin,
+      streak_at_time:streak,
+      planned_day:plannedDay||null,
+      logged_day:DAYS_SH[S.today.getDay()],
+      off_plan:offPlan
+    }).select().single();
+    if(error||!sess)throw new Error(error?.message||'Insert returned no data');
     const setRows=[];
-    plan.exercises.forEach((ex,ei)=>{(log[ei]||[]).forEach((reps,si)=>{if(reps!==null)setRows.push({session_id:sess.id,exercise_name:ex.name,set_number:si+1,reps,is_time:!!(ex.isTime||ex.isMinutes)});});});
+    plan.exercises.forEach((ex,ei)=>{
+      (log[ei]||[]).forEach((reps,si)=>{
+        if(reps!==null)setRows.push({
+          session_id:sess.id,
+          exercise_name:ex.name,
+          set_number:si+1,
+          reps,
+          is_time:!!(ex.isTime||ex.isMinutes)
+        });
+      });
+    });
     if(setRows.length)await db.from('set_logs').insert(setRows);
-    S.lastSessionData={...sess,sets:setRows,kcal,streak,totalReps,totalSets:allSets.length};
-  }
-  if(!error&&sess){
+    S.lastSessionData={...sess,kcal,streak,totalReps,totalSets:allSets.length};
     localStorage.removeItem('gymlog_active_session');
-  } else if(!S.lastSessionData){
     S._isSaving=false;
-    showToast('Save failed — your sets are preserved, try finishing again');
-    return;
+    showDone();
+  }catch(e){
+    const msg=e?.message||e?.error_description||JSON.stringify(e)||'unknown';
+    console.error('saveAndShowDone error:',msg);
+    S._isSaving=false;
+    showToast('Save failed: '+msg);
   }
-  S._isSaving=false;
-  showDone();
 }
 
 function showDone(){
@@ -819,7 +876,15 @@ function checkFaceIDStatus(){const el=document.getElementById('faceid-status');i
 async function requestPush(){if(!('Notification'in window)){showToast('Push not supported');return;}const p=await Notification.requestPermission();if(p==='granted'){document.getElementById('push-btn').textContent='Enabled ✓';showToast('Push notifications enabled');}}
 
 let toastT;
-function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),3000);}
+function showToast(msg){
+  const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),3000);
+  // Surface errors in debug bar so they're readable on device
+  if(msg.toLowerCase().includes('fail')||msg.toLowerCase().includes('error')){
+    const bar=document.getElementById('debug-bar');
+    if(bar){bar.style.display='block';bar.textContent=new Date().toLocaleTimeString()+': '+msg;}
+  }
+}
 
 // Auto-skip lock screen if already unlocked this browser session
 if(sessionStorage.getItem('gymlog_unlocked')==='1'){unlockApp();}
