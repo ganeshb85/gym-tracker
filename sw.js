@@ -1,4 +1,4 @@
-const CACHE = 'gymlog-v1';
+const CACHE = 'gymlog-v2';
 // Paths work for both GitHub Pages (/repo/gym-log/) and root deploys
 const BASE = self.location.pathname.replace(/sw\.js$/, '');
 const ASSETS = [BASE + 'gymlog.html', BASE + 'manifest.json'];
