@@ -1125,7 +1125,7 @@ function renderHoldTimer(remaining,total){
             stroke-linecap="round" transform="rotate(-90 50 50)" style="transition:stroke-dashoffset .9s linear,stroke .4s"/>
         </svg>
         <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
-          <div style="font-size:34px;font-weight:800;color:${warning?'var(--red)':'var(--text)';}">${remaining}</div>
+          <div style="font-size:34px;font-weight:800;color:${warning?'var(--red)':'var(--text)'}"  >${remaining}</div>
           <div style="font-size:11px;color:var(--text3);font-weight:600;margin-top:2px">seconds</div>
         </div>
       </div>
@@ -1411,7 +1411,9 @@ async function fixCorruptedSessions(){
   }catch(e){
     resultEl.textContent='Error: '+(e.message||JSON.stringify(e));
   }
-}const w=parseFloat(document.getElementById('weight-inp').value)||62;WEIGHT_KG=w;await db.from('user_settings').upsert({id:1,weight_kg:w},{onConflict:'id'});showToast('Settings saved ✓');}
+}
+
+async function saveSettings(){const w=parseFloat(document.getElementById('weight-inp').value)||62;WEIGHT_KG=w;await db.from('user_settings').upsert({id:1,weight_kg:w},{onConflict:'id'});showToast('Settings saved ✓');}
 async function requestPush(){if(!('Notification'in window)){showToast('Push not supported');return;}const p=await Notification.requestPermission();if(p==='granted'){document.getElementById('push-btn').textContent='Enabled ✓';showToast('Push notifications enabled');}}
 
 let toastT;
