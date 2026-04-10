@@ -184,8 +184,11 @@ html,body{height:100%;background:var(--bg);font-family:var(--sans);color:var(--t
       </div>
       <div class="sec-lbl">Gym sessions — pick any plan</div>
       <div id="gym-plan-cards"></div>
-      <div class="sec-lbl">Other activities</div>
-      <div class="preset-grid" id="preset-cards"></div>
+      <div class="sec-lbl" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none" onclick="togglePresets()">
+        <span>Other activities</span>
+        <span id="presets-chevron" style="font-size:11px;color:var(--text3);font-weight:700;transition:transform .25s;display:inline-block">▼</span>
+      </div>
+      <div id="preset-cards" class="preset-grid" style="display:none"></div>
       <div class="sec-lbl">Custom activity</div>
       <div class="custom-row"><input class="custom-inp" id="custom-act-name" type="text" placeholder="e.g. Swimming, HIIT, Badminton…" oninput="onCustomInput(this.value)"></div>
       <div class="dur-row">
@@ -212,6 +215,12 @@ html,body{height:100%;background:var(--bg);font-family:var(--sans);color:var(--t
       <div class="wo-nav">
         <div class="back-btn" onclick="switchTab('home')"><svg viewBox="0 0 16 16"><path d="M10 3L5 8l5 5"/></svg></div>
         <div><div class="wo-title" id="wo-title">–</div><div class="wo-sub" id="wo-sub">–</div></div>
+        <div id="audio-arm-btn" onclick="armAudio()" title="Arm audio alerts" style="width:34px;height:34px;border-radius:10px;background:#fff;border:.5px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;margin-left:auto">
+          <svg id="audio-arm-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--text3)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+            <path id="audio-waves" d="M15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14" stroke="var(--text3)"/>
+          </svg>
+        </div>
       </div>
       <div class="prog-track"><div class="prog-fill" id="prog-fill" style="width:0%"></div></div>
       <div class="prog-meta"><span class="prog-lbl" id="prog-label">–</span><span class="prog-kcal" id="prog-kcal"></span></div>
@@ -249,6 +258,10 @@ html,body{height:100%;background:var(--bg);font-family:var(--sans);color:var(--t
       <div class="s-group">
         <div class="s-row"><div><div class="s-lbl">Supabase project</div></div><div class="s-val" style="font-size:11px">ooultiizgymelwguxuxi</div></div>
         <div class="s-row"><div><div class="s-lbl">Version</div></div><div class="s-val">2.0.0</div></div>
+      </div>
+      <div class="s-group">
+        <div class="s-row"><div><div class="s-lbl">Fix corrupted sessions</div><div class="s-sub">Remove sessions with duration > 3 hours</div></div><button class="s-action" onclick="fixCorruptedSessions()" style="background:var(--adim);color:var(--amber);border-color:rgba(255,149,0,.3)">Scan</button></div>
+        <div id="corrupt-result" style="display:none;padding:8px 16px 10px;font-size:12px;color:var(--text2);line-height:1.5"></div>
       </div>
       <div style="padding:14px 16px 0"><button class="btn-primary" onclick="saveSettings()">Save settings</button></div>
     </div>
@@ -298,6 +311,15 @@ html,body{height:100%;background:var(--bg);font-family:var(--sans);color:var(--t
     <div class="exp-head"><div class="exp-title">Export to Obsidian</div><div class="exp-close" onclick="closeExport()">Done</div></div>
     <div class="exp-preview" id="export-preview"></div>
     <div class="exp-actions"><button class="btn-primary" onclick="copyMD()">Copy markdown</button><button class="btn-secondary" onclick="saveMD()">Save to iCloud</button></div>
+  </div>
+  <div id="day-detail-modal" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,.5);z-index:120;align-items:flex-end;justify-content:center">
+    <div style="background:var(--bg);border-radius:24px 24px 0 0;width:100%;max-width:430px;max-height:80vh;overflow-y:auto;padding-bottom:env(safe-area-inset-bottom,0px)">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 20px 12px;background:#fff;border-radius:24px 24px 0 0;position:sticky;top:0">
+        <div id="ddm-title" style="font-size:18px;font-weight:700"></div>
+        <div onclick="closeDayDetail()" style="width:30px;height:30px;border-radius:50%;background:var(--bg);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--text2)">✕</div>
+      </div>
+      <div id="ddm-body" style="padding:0 16px 24px"></div>
+    </div>
   </div>
   <div id="doms-modal" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,.5);z-index:120;align-items:flex-end;justify-content:center">
     <div style="background:#fff;border-radius:24px 24px 0 0;padding:28px 24px 40px;width:100%;max-width:430px">
@@ -381,14 +403,11 @@ const MET_TABLE={'walk':4.3,'brisk walk':4.5,'elliptical':5.0,'recumbent bike':4
 
 const PRESETS=[
   {name:'Walk',icon:'🚶',type:'walk',met:4.3},
-  {name:'Elliptical',icon:'🏃',type:'elliptical',met:5.0},
-  {name:'Pickleball',icon:'🏓',type:'pickleball',met:6.5},
-  {name:'Cycle',icon:'🚴',type:'cycle',met:7.5},
-  {name:'Swim',icon:'🏊',type:'swim',met:7.0},
-  {name:'Yoga',icon:'🧘',type:'yoga',met:2.5},
-  {name:'Run',icon:'🏃',type:'run',met:8.5},
-  {name:'Badminton',icon:'🏸',type:'badminton',met:5.5},
-  {name:'HIIT',icon:'⚡',type:'hiit',met:8.0},
+  {name:'Jog',icon:'🏃',type:'jog',met:7.0},
+  {name:'Elliptical',icon:'〇',type:'elliptical',met:5.0},
+  {name:'Recumbent Bike',icon:'🚲',type:'recumbent bike',met:4.0},
+  {name:'Brisk Walk',icon:'👟',type:'brisk walk',met:4.5},
+  {name:'Stretching',icon:'🧘',type:'stretching',met:2.3},
 ];
 
 // 400 KCAL FACT TEMPLATES — [minKcal, maxKcal, icon, text with {k} and {n(expr,decimals)}]
@@ -546,9 +565,11 @@ function renderStats(period){
   const filtered=S.sessions.filter(s=>new Date(s.session_date+'T00:00:00')>=startDate);
   const totalSess=filtered.length;
   const totalSets=filtered.reduce((a,s)=>a+(s.total_sets||0),0);
-  const totalReps=filtered.reduce((a,s)=>a+(s.total_reps||0),0);
-  const totalKcal=Math.round(filtered.reduce((a,s)=>a+(s.calories_kcal||0),0));
-  const totalMins=filtered.reduce((a,s)=>a+(s.duration_min||0),0);
+  // Exclude sessions with duration > 180 min — these are corrupted records (e.g. session left open overnight)
+  const validSess=filtered.filter(s=>(s.duration_min||0)<=180);
+  const totalKcal=Math.round(validSess.reduce((a,s)=>a+(s.calories_kcal||0),0));
+  const totalMins=validSess.reduce((a,s)=>a+(s.duration_min||0),0);
+  const avgSetsPerSession=totalSess>0?Math.round(totalSets/totalSess):0;
   const gymSess=filtered.filter(s=>s.workout_category==='gym');
   const upperCount=gymSess.filter(s=>s.workout_type==='upper_a'||s.workout_type==='upper_b').length;
   const lowerCount=gymSess.filter(s=>s.workout_type==='lower_a'||s.workout_type==='lower_b').length;
@@ -565,9 +586,10 @@ function renderStats(period){
     <div class="stats-cell"><div class="stats-cell-val" style="color:var(--green)">${totalSets}</div><div class="stats-cell-lbl">Sets</div></div>
     <div class="stats-cell"><div class="stats-cell-val" style="color:var(--amber)">${totalKcal}</div><div class="stats-cell-lbl">Kcal</div></div>
   </div></div></div>`;
+  const timeDisplay=totalMins>=60?`${Math.floor(totalMins/60)}h${totalMins%60>0?' '+(totalMins%60)+'m':''}`:`${totalMins}m`;
   html+=`<div class="stats-section"><div class="stats-card"><div class="stats-grid">
-    <div class="stats-cell"><div class="stats-cell-val">${totalReps}</div><div class="stats-cell-lbl">Reps</div></div>
-    <div class="stats-cell"><div class="stats-cell-val">${Math.round(totalMins/60*10)/10}h</div><div class="stats-cell-lbl">Time</div></div>
+    <div class="stats-cell"><div class="stats-cell-val">${avgSetsPerSession}</div><div class="stats-cell-lbl">Avg sets/session</div></div>
+    <div class="stats-cell"><div class="stats-cell-val">${timeDisplay}</div><div class="stats-cell-lbl">Time</div></div>
     <div class="stats-cell"><div class="stats-cell-val">${S.streak}</div><div class="stats-cell-lbl">Streak 🔥</div></div>
   </div></div></div>`;
   if(period==='week'||period==='month'){
@@ -672,11 +694,13 @@ function renderHome(){
   for(let i=0;i<7;i++){
     const d=new Date(mon2);d.setDate(mon2.getDate()+i);
     const dk=dateISO(d),isToday=dk===todayISO();
-    const done=S.sessions.some(s=>dateISO(s.session_date)===dk);
+    const sess=S.sessions.find(s=>dateISO(s.session_date)===dk);
+    const done=!!sess;
     const isGymDay=gymDays.has(d.getDay());
     const label=['M','T','W','T','F','S','S'][i];
     const cls=done?'wd wd-done':isToday?'wd wd-today':isGymDay?'wd wd-gym':'wd wd-rest';
-    wr.innerHTML+=`<div class="wc"><div class="${cls}">${done?'✓':label}</div><div class="wl">${DAYS_SH[d.getDay()]}</div></div>`;
+    const sessId=sess?`data-sessid="${sess.id}"`:'';
+    wr.innerHTML+=`<div class="wc" onclick="showDayDetail('${dk}')" style="cursor:pointer"><div class="${cls}" ${sessId}>${done?'✓':label}</div><div class="wl">${DAYS_SH[d.getDay()]}</div></div>`;
   }
   const planArea=document.getElementById('home-plan-area'),btnsArea=document.getElementById('home-btns');
   if(plan&&!todaySess){
@@ -692,6 +716,14 @@ function renderHome(){
   }
 }
 
+function togglePresets(){
+  const grid=document.getElementById('preset-cards');
+  const icon=document.getElementById('presets-chevron');
+  const open=grid.style.display==='none';
+  grid.style.display=open?'grid':'none';
+  if(icon)icon.style.transform=open?'rotate(180deg)':'rotate(0deg)';
+}
+
 function renderPicker(){
   S.pickerSel=null;S.pickerDur=45;
   document.getElementById('picker-date').textContent=fmtDate(S.today);
@@ -700,6 +732,10 @@ function renderPicker(){
   document.getElementById('custom-act-name').value='';
   document.getElementById('picker-start-btn').disabled=true;
   document.getElementById('picker-start-btn').textContent='Select an activity';
+  const grid=document.getElementById('preset-cards');
+  if(grid)grid.style.display='none';
+  const chevron=document.getElementById('presets-chevron');
+  if(chevron)chevron.style.transform='rotate(0deg)';
   const dow=S.today.getDay(),todayDk={1:'Mon',3:'Wed',4:'Thu',6:'Sat'}[dow];
   document.getElementById('gym-plan-cards').innerHTML=Object.entries(PLANS).map(([k,p])=>{
     const isToday=k===todayDk,dayName={Mon:'Monday',Wed:'Wednesday',Thu:'Thursday',Sat:'Saturday'}[k];
@@ -707,7 +743,7 @@ function renderPicker(){
     const exRows=p.exercises.map(ex=>`<div class="pc-exrow"><div class="pc-dot"></div><div class="pc-exn">${ex.name}</div><div class="pc-exs">${ex.isMinutes?ex.def+' min':ex.isTime?ex.def+'s':ex.sets+'×'+ex.def}</div></div>`).join('');
     return `<div class="plan-card" id="pc-${k}" onclick="selectPlan('${k}')"><div class="pc-head"><div><div class="pc-title">${p.label}</div><div class="pc-meta">${p.exercises.length} exercises · ~${p.duration} min · ${calcKcal(p.met,p.duration)} kcal est.</div></div>${badge}</div>${exRows}</div>`;
   }).join('');
-  document.getElementById('preset-cards').innerHTML=PRESETS.map(a=>`<div class="preset-btn" id="pb-${a.type}" onclick="selectPreset('${a.type}')"><div class="pb-icon">${a.icon}</div><div class="pb-name">${a.name}</div><div class="pb-kcal" id="pbk-${a.type}">${calcKcal(a.met,45)} kcal / 45 min</div></div>`).join('');
+  document.getElementById('preset-cards').innerHTML=PRESETS.map(a=>`<div class="preset-btn" id="pb-${a.type.replace(/\s+/g,'-')}" onclick="selectPreset('${a.type}')"><div class="pb-icon">${a.icon}</div><div class="pb-name">${a.name}</div><div class="pb-kcal" id="pbk-${a.type.replace(/\s+/g,'-')}">${calcKcal(a.met,45)} kcal / 45 min</div></div>`).join('');
 }
 
 function selectPlan(dk){
@@ -748,7 +784,7 @@ function changeDur(d){
   S.pickerDur=Math.max(5,Math.min(180,S.pickerDur+d));
   document.getElementById('dur-display').textContent=S.pickerDur+' min';
   if(S.pickerSel&&!S.pickerSel.isGym){S.pickerSel.duration=S.pickerDur;updKcal();}
-  PRESETS.forEach(a=>{const el=document.getElementById('pbk-'+a.type);if(el)el.textContent=calcKcal(a.met,S.pickerDur)+' kcal / '+S.pickerDur+' min';});
+  PRESETS.forEach(a=>{const el=document.getElementById('pbk-'+a.type.replace(/\s+/g,'-'));if(el)el.textContent=calcKcal(a.met,S.pickerDur)+' kcal / '+S.pickerDur+' min';});
 }
 function updKcal(){if(S.pickerSel)document.getElementById('kcal-preview').textContent=calcKcal(S.pickerSel.met,S.pickerDur)+' kcal';}
 function enablePicker(){document.getElementById('picker-start-btn').disabled=false;}
@@ -882,6 +918,9 @@ function launchSession(dk){
   S.activeSession={plan,dayKey:dk,plannedDay:dk!==curDk?DAYS_LONG[{Mon:1,Wed:3,Thu:4,Sat:6}[dk]]:null,log,sel,wt,startTime:Date.now()};
   S._domsScore=0;
   S.exIdx=0;
+  audioArmed=false;
+  clearInterval(holdTimerInterval);
+  clearInterval(restTimerInterval);
   persistSession();
   document.getElementById('wo-title').textContent=plan.label;
   document.getElementById('wo-sub').textContent=S.activeSession.plannedDay?`${S.activeSession.plannedDay} plan · logged ${fmtDate(S.today)}`:fmtDate(S.today);
@@ -917,7 +956,9 @@ function renderExercise(){
   const logLabel=curWt!=null&&isWeighted?`Log set · ${selVal}${ex.isTime?'s':ex.isMinutes?' min':' reps'} @ ${curWt}kg`:`Log set · ${selVal}${ex.isTime?'s':ex.isMinutes?' min':' reps'}`;
   const actionBtn=allDone
     ?`<button class="log-btn nxt" onclick="nextEx()">${isLastEx?'Finish workout ✓':'Next exercise →'}</button>`
-    :`<button class="log-btn" onclick="logSet(${nextP})">${logLabel}</button><button class="skip-lnk" onclick="nextEx()">Skip exercise</button>`;
+    :ex.isTime
+      ?`<button class="log-btn" style="background:var(--amber)" onclick="startHoldTimer(${selVal},${nextP})">Start hold · ${selVal}s</button><button class="skip-lnk" onclick="nextEx()">Skip exercise</button>`
+      :`<button class="log-btn" onclick="logSet(${nextP})">${logLabel}</button><button class="skip-lnk" onclick="nextEx()">Skip exercise</button>`;
   document.getElementById('wo-scroll').innerHTML=`<div class="ex-card"><div class="ec-head"><div><div class="ec-name">${ex.name}</div><div class="ec-target">${ex.target}</div></div><div class="set-badge">${allDone?'Done ✓':`Set ${nextP+1} / ${ex.sets}`}</div></div>${lastHint}<div class="circles">${circles}</div><div class="rep-lbl">${unitLabel}</div><div class="rep-row">${repBtns}</div>${wtBlock}${actionBtn}</div>${tip}<div class="ex-nav"><div class="en-btn" onclick="prevEx()">← Prev</div><div class="en-btn" onclick="nextEx()">Next →</div></div>`;
 }
 
@@ -967,6 +1008,133 @@ function startRestTimer(secs){
 
 function dismissTimer(){clearInterval(restTimerInterval);renderExercise();}
 
+// ── Audio ──────────────────────────────────────────────────────────────────
+let audioCtx=null;
+let audioArmed=false;
+
+function armAudio(){
+  if(!audioArmed){
+    audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    // Play a silent node immediately to satisfy iOS interaction requirement
+    const buf=audioCtx.createBuffer(1,1,22050);
+    const src=audioCtx.createBufferSource();
+    src.buffer=buf;src.connect(audioCtx.destination);src.start(0);
+    audioArmed=true;
+    // Update button to show armed state
+    const btn=document.getElementById('audio-arm-btn');
+    if(btn){btn.style.background='var(--gdim)';btn.style.borderColor='var(--green)';}
+    const waves=document.getElementById('audio-waves');
+    if(waves){waves.setAttribute('stroke','var(--green)');}
+    const icon=document.getElementById('audio-arm-icon');
+    if(icon){icon.setAttribute('stroke','var(--green)');}
+    showToast('Audio armed — beep will sound at hold end');
+  }else{
+    audioArmed=false;
+    const btn=document.getElementById('audio-arm-btn');
+    if(btn){btn.style.background='#fff';btn.style.borderColor='var(--border)';}
+    const waves=document.getElementById('audio-waves');
+    if(waves){waves.setAttribute('stroke','var(--text3)');}
+    const icon=document.getElementById('audio-arm-icon');
+    if(icon){icon.setAttribute('stroke','var(--text3)');}
+    showToast('Audio disarmed');
+  }
+}
+
+function playBeep(freq=880,dur=0.18,vol=0.6,type='sine'){
+  if(!audioArmed||!audioCtx)return;
+  try{
+    const osc=audioCtx.createOscillator();
+    const gain=audioCtx.createGain();
+    osc.connect(gain);gain.connect(audioCtx.destination);
+    osc.type=type;osc.frequency.value=freq;
+    gain.gain.setValueAtTime(vol,audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+    osc.start(audioCtx.currentTime);osc.stop(audioCtx.currentTime+dur);
+  }catch(e){}
+}
+
+function playWarningBeep(){
+  // Two short mid-tone beeps at 10s warning
+  playBeep(660,0.1,0.4);
+  setTimeout(()=>playBeep(660,0.1,0.4),160);
+}
+
+function playDoneBeep(){
+  // Three ascending tones — hold complete
+  playBeep(660,0.15,0.6);
+  setTimeout(()=>playBeep(880,0.15,0.6),180);
+  setTimeout(()=>playBeep(1100,0.25,0.7),360);
+}
+
+// ── Hold timer ────────────────────────────────────────────────────────────
+let holdTimerInterval=null;
+
+function startHoldTimer(totalSecs,setIdx){
+  clearInterval(holdTimerInterval);
+  clearInterval(restTimerInterval);
+  let remaining=totalSecs;
+  renderHoldTimer(remaining,totalSecs);
+  holdTimerInterval=setInterval(()=>{
+    remaining--;
+    if(remaining<=0){
+      clearInterval(holdTimerInterval);
+      if(navigator.vibrate)navigator.vibrate([150,80,150,80,200]);
+      playDoneBeep();
+      // Auto-log the set with the hold duration
+      S.activeSession.log[S.exIdx][setIdx]=totalSecs;
+      persistSession();
+      const allComplete=S.activeSession.plan.exercises.every((_,idx)=>S.activeSession.log[idx].every(s=>s!==null));
+      if(allComplete){setTimeout(saveAndShowDone,400);return;}
+      const allDone=S.activeSession.log[S.exIdx].every(s=>s!==null);
+      if(!allDone){startRestTimer(60);}
+      else{renderExercise();}
+    }else{
+      if(remaining===10){
+        if(navigator.vibrate)navigator.vibrate(80);
+        playWarningBeep();
+      }
+      renderHoldTimer(remaining,totalSecs);
+    }
+  },1000);
+}
+
+function cancelHold(){
+  clearInterval(holdTimerInterval);
+  renderExercise();
+}
+
+function renderHoldTimer(remaining,total){
+  const pct=Math.round((remaining/total)*100);
+  const ex=S.activeSession.plan.exercises[S.exIdx];
+  const setsDone=S.activeSession.log[S.exIdx].filter(s=>s!==null).length;
+  const warning=remaining<=10;
+  // Colour transitions: amber (start) → green (nearly done) — inverted from rest timer
+  const progressPct=100-pct; // grows as time passes
+  const ringColour=warning?'var(--red)':progressPct>70?'var(--green)':'var(--amber)';
+  const circumference=Math.round(2*Math.PI*44);
+  const dashOffset=Math.round(circumference*(1-progressPct/100));
+  document.getElementById('wo-scroll').innerHTML=`
+    <div class="ex-card" style="text-align:center;padding:24px 16px">
+      <div style="font-size:14px;font-weight:600;color:var(--text2);margin-bottom:2px">${ex.name}</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:20px">Set ${setsDone+1} of ${ex.sets} · Hold steady</div>
+      <div style="position:relative;width:120px;height:120px;margin:0 auto 20px">
+        <svg width="120" height="120" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="44" fill="none" stroke="var(--border)" stroke-width="6"/>
+          <circle cx="50" cy="50" r="44" fill="none" stroke="${ringColour}" stroke-width="6"
+            stroke-dasharray="${circumference}" stroke-dashoffset="${dashOffset}"
+            stroke-linecap="round" transform="rotate(-90 50 50)" style="transition:stroke-dashoffset .9s linear,stroke .4s"/>
+        </svg>
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+          <div style="font-size:34px;font-weight:800;color:${warning?'var(--red)':'var(--text)';}">${remaining}</div>
+          <div style="font-size:11px;color:var(--text3);font-weight:600;margin-top:2px">seconds</div>
+        </div>
+      </div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:6px">${warning?'⚡ Almost there — hold it!':remaining<=Math.round(total/2)?'Halfway — stay strong':'Breathe and hold'}</div>
+      ${!audioArmed?`<div style="font-size:11px;color:var(--text3);margin-bottom:16px">Tap 🔊 in header to arm audio alert</div>`:'<div style="font-size:11px;color:var(--green2);margin-bottom:16px">🔊 Audio armed</div>'}
+      <button onclick="cancelHold()" style="background:none;border:.5px solid var(--border2);border-radius:12px;padding:9px 20px;font-size:13px;color:var(--text2);font-family:var(--sans);cursor:pointer">Cancel hold</button>
+    </div>`;
+}
+
 function renderRestTimer(remaining,total){
   const pct=Math.round((remaining/total)*100);
   const ex=S.activeSession.plan.exercises[S.exIdx];
@@ -997,8 +1165,14 @@ async function saveAndShowDone(){
     const{plan,log,startTime,plannedDay,dayKey}=S.activeSession;
     const allSets=Object.values(log).flat().filter(x=>x!==null);
     const loggedExCount=Object.values(log).filter(sets=>sets.some(s=>s!==null)).length;
-    const totalReps=allSets.reduce((a,b)=>a+(typeof b==='number'?b:0),0);
-    const durationMin=Math.max(Math.round((Date.now()-startTime)/60000),10);
+    // Only count actual rep-based sets — exclude isTime and isMinutes exercises from reps total
+    const totalReps=plan.exercises.reduce((total,ex,ei)=>{
+      if(ex.isTime||ex.isMinutes)return total;
+      return total+(log[ei]||[]).filter(x=>x!==null).reduce((a,b)=>a+(typeof b==='number'?b:0),0);
+    },0);
+    // Cap duration: actual elapsed time but never more than plan.duration + 30 min buffer
+    const elapsed=Math.round((Date.now()-startTime)/60000);
+    const durationMin=Math.min(Math.max(elapsed,10),plan.duration+30);
     const kcal=calcKcal(plan.met,durationMin);
     const dow=S.today.getDay(),curDk={1:'Mon',3:'Wed',4:'Thu',6:'Sat'}[dow];
     const offPlan=dayKey!==curDk;
@@ -1049,7 +1223,7 @@ async function saveAndShowDone(){
 function showDone(){
   const d=S.lastSessionData||{};
   document.getElementById('d-sets').textContent=d.total_sets||0;
-  document.getElementById('d-reps').textContent=d.total_reps||0;
+  document.getElementById('d-reps').textContent=d.totalReps||0;
   document.getElementById('d-kcal').textContent=Math.round(d.calories_kcal||d.kcal||0);
   document.getElementById('d-streak').textContent=d.streak_at_time||d.streak||1;
   document.getElementById('done-sub').textContent=`${fmtDate(S.today)} · ${d.workout_label||d.workout_type||''} · Streak ${d.streak_at_time||d.streak||1} days 🔥`;
@@ -1060,6 +1234,9 @@ function showDone(){
 function finishSession(){
   document.getElementById('done').classList.remove('show');
   S.activeSession=null;
+  audioArmed=false;
+  clearInterval(holdTimerInterval);
+  clearInterval(restTimerInterval);
   localStorage.removeItem('gymlog_active_session');
   loadData().then(renderHome);
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
@@ -1128,7 +1305,113 @@ async function saveMD(){
   }catch(e){if(e.name!=='AbortError'){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type:'text/markdown'}));a.download=filename;a.click();showToast(`Downloaded ${filename}`);}}
 }
 
-async function saveSettings(){const w=parseFloat(document.getElementById('weight-inp').value)||62;WEIGHT_KG=w;await db.from('user_settings').upsert({id:1,weight_kg:w},{onConflict:'id'});showToast('Settings saved ✓');}
+function closeDayDetail(){document.getElementById('day-detail-modal').style.display='none';}
+
+async function showDayDetail(dateStr){
+  const modal=document.getElementById('day-detail-modal');
+  const dt=new Date(dateStr+'T00:00:00');
+  const dayName=DAYS_LONG[dt.getDay()];
+  const isToday=dateStr===todayISO();
+  const isFuture=dt>S.today&&!isToday;
+  document.getElementById('ddm-title').textContent=`${dayName}, ${fmtDate(dt)}${isToday?' · Today':''}`;
+  document.getElementById('ddm-body').innerHTML='<div style="padding:16px 0;color:var(--text2);font-size:14px">Loading…</div>';
+  modal.style.display='flex';
+  const sess=S.sessions.find(s=>dateISO(s.session_date)===dateStr);
+  if(isFuture&&!sess){
+    const gymDays={1:'Mon',3:'Wed',4:'Thu',6:'Sat'};
+    const dk=gymDays[dt.getDay()];
+    const plan=dk?PLANS[dk]:null;
+    if(plan){
+      const exRows=plan.exercises.map(ex=>`<div class="ex-row"><div class="ex-dot"></div><div class="ex-name">${ex.name}</div><div class="ex-sets" style="font-size:11px">${ex.isMinutes?ex.def+' min':ex.isTime?ex.def+'s':ex.sets+'×'+ex.def}</div></div>`).join('');
+      document.getElementById('ddm-body').innerHTML=`<div style="margin-top:8px;background:#fff;border:.5px solid var(--border);border-radius:14px;overflow:hidden"><div style="padding:10px 14px;font-size:13px;color:var(--text2);background:var(--bg)">Scheduled: ${plan.label}</div>${exRows}</div>`;
+    }else{
+      document.getElementById('ddm-body').innerHTML=`<div style="padding:20px 0;text-align:center;color:var(--text3);font-size:14px">Rest day</div>`;
+    }
+    return;
+  }
+  if(!sess){
+    const gymDays={1:'Mon',3:'Wed',4:'Thu',6:'Sat'};
+    const dk=gymDays[dt.getDay()];
+    const wasGymDay=!!dk;
+    document.getElementById('ddm-body').innerHTML=wasGymDay
+      ?`<div style="padding:20px 0;text-align:center"><div style="font-size:32px;margin-bottom:8px">😴</div><div style="font-size:14px;color:var(--text2)">No session logged</div><div style="font-size:12px;color:var(--text3);margin-top:4px">This was a scheduled ${PLANS[dk]?.label||''} day</div></div>`
+      :`<div style="padding:20px 0;text-align:center;color:var(--text3);font-size:14px">Rest day — no session expected</div>`;
+    return;
+  }
+  // Load set details from DB
+  let setDetail='';
+  try{
+    const{data:sets}=await db.from('set_logs').select('*').eq('session_id',sess.id).order('exercise_name').order('set_number');
+    if(sets&&sets.length){
+      const byEx={};
+      sets.forEach(r=>{if(!byEx[r.exercise_name])byEx[r.exercise_name]=[];byEx[r.exercise_name].push(r);});
+      const rows=Object.entries(byEx).map(([exName,exSets])=>{
+        const setsStr=exSets.map(s=>{
+          if(s.is_time)return`${s.reps}s`;
+          return s.weight_kg?`${s.reps}×${s.weight_kg}kg`:`${s.reps} reps`;
+        }).join(' · ');
+        return`<div class="ex-row"><div class="ex-dot" style="background:var(--blue)"></div><div class="ex-name" style="font-size:13px">${exName}</div><div class="ex-sets" style="font-size:11px;color:var(--text2)">${setsStr}</div></div>`;
+      }).join('');
+      setDetail=`<div style="margin-top:10px;background:#fff;border:.5px solid var(--border);border-radius:14px;overflow:hidden">${rows}</div>`;
+    }
+  }catch(e){}
+  const cleanKcal=Math.round(sess.calories_kcal||0);
+  const cleanDur=sess.duration_min||0;
+  document.getElementById('ddm-body').innerHTML=`
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px">
+      <div style="background:#fff;border:.5px solid var(--border);border-radius:12px;padding:10px 12px;text-align:center">
+        <div style="font-size:18px;font-weight:800;color:var(--blue)">${sess.total_sets||0}</div>
+        <div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;margin-top:2px">Sets</div>
+      </div>
+      <div style="background:#fff;border:.5px solid var(--border);border-radius:12px;padding:10px 12px;text-align:center">
+        <div style="font-size:18px;font-weight:800;color:var(--amber)">${cleanKcal}</div>
+        <div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;margin-top:2px">Kcal</div>
+      </div>
+      <div style="background:#fff;border:.5px solid var(--border);border-radius:12px;padding:10px 12px;text-align:center">
+        <div style="font-size:18px;font-weight:800;color:var(--text)">${cleanDur}m</div>
+        <div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;margin-top:2px">Time</div>
+      </div>
+    </div>
+    <div style="margin-top:10px;background:#fff;border:.5px solid var(--border);border-radius:12px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:13px;font-weight:600">${sess.workout_label||sess.workout_type}</div>
+      <span class="pill ${sess.workout_category==='gym'?'pill-blue':'pill-gray'}">${(sess.workout_label||sess.workout_type||'').toUpperCase()}</span>
+    </div>
+    ${setDetail}
+    ${sess.off_plan?`<div style="margin-top:8px;padding:8px 12px;background:var(--adim);border-radius:10px;font-size:12px;color:var(--amber)">Logged on ${sess.logged_day} — planned for ${sess.planned_day}</div>`:''}`;
+}
+
+async function fixCorruptedSessions(){
+  const resultEl=document.getElementById('corrupt-result');
+  resultEl.style.display='block';
+  resultEl.textContent='Scanning…';
+  try{
+    const{data,error}=await db.from('workout_sessions')
+      .select('id,session_date,workout_label,duration_min,calories_kcal')
+      .gt('duration_min',180);
+    if(error)throw error;
+    if(!data||data.length===0){
+      resultEl.textContent='No corrupted sessions found. All records look clean.';
+      return;
+    }
+    const list=data.map(s=>`${fmtDate(s.session_date)} — ${s.workout_label||'Unknown'} · ${s.duration_min} min · ${Math.round(s.calories_kcal||0)} kcal`).join('\n');
+    resultEl.innerHTML=`Found ${data.length} corrupted session${data.length>1?'s':''}:<br><br><code style="font-size:11px;background:var(--bg);padding:6px 8px;border-radius:6px;display:block;line-height:1.8">${list.replace(/\n/g,'<br>')}</code><br>`;
+    const btn=document.createElement('button');
+    btn.className='btn-secondary';
+    btn.style.cssText='margin-top:6px;padding:10px;font-size:13px;color:var(--red);border-color:var(--red)';
+    btn.textContent=`Delete ${data.length} corrupted session${data.length>1?'s':''}`;
+    btn.onclick=async()=>{
+      btn.disabled=true;btn.textContent='Deleting…';
+      const ids=data.map(s=>s.id);
+      await db.from('set_logs').delete().in('session_id',ids);
+      await db.from('workout_sessions').delete().in('id',ids);
+      resultEl.textContent=`Deleted ${ids.length} corrupted session${ids.length>1?'s':[]}. Stats will now be accurate.`;
+      await loadData();
+    };
+    resultEl.appendChild(btn);
+  }catch(e){
+    resultEl.textContent='Error: '+(e.message||JSON.stringify(e));
+  }
+}const w=parseFloat(document.getElementById('weight-inp').value)||62;WEIGHT_KG=w;await db.from('user_settings').upsert({id:1,weight_kg:w},{onConflict:'id'});showToast('Settings saved ✓');}
 async function requestPush(){if(!('Notification'in window)){showToast('Push not supported');return;}const p=await Notification.requestPermission();if(p==='granted'){document.getElementById('push-btn').textContent='Enabled ✓';showToast('Push notifications enabled');}}
 
 let toastT;
