@@ -559,8 +559,9 @@ function renderStats(period){
   else{subLabel=`All time · ${S.sessions.length} sessions total`;}
   document.getElementById('stats-sub').textContent=subLabel;
   let html='';
+  const sessTarget=target?`<span style="font-size:13px;color:var(--text3)">/${target}</span>`:'';
   html+=`<div class="stats-section"><div class="stats-card"><div class="stats-grid">
-    <div class="stats-cell"><div class="stats-cell-val" style="color:var(--blue)">${totalSess}${target?'<span style="font-size:13px;color:var(--text3)">/${target}</span>':''}</div><div class="stats-cell-lbl">Sessions</div></div>
+    <div class="stats-cell"><div class="stats-cell-val" style="color:var(--blue)">${totalSess}${sessTarget}</div><div class="stats-cell-lbl">Sessions</div></div>
     <div class="stats-cell"><div class="stats-cell-val" style="color:var(--green)">${totalSets}</div><div class="stats-cell-lbl">Sets</div></div>
     <div class="stats-cell"><div class="stats-cell-val" style="color:var(--amber)">${totalKcal}</div><div class="stats-cell-lbl">Kcal</div></div>
   </div></div></div>`;
@@ -571,9 +572,13 @@ function renderStats(period){
   </div></div></div>`;
   if(period==='week'||period==='month'){
     const maxBal=Math.max(upperCount,lowerCount,1);
-    html+=`<div class="stats-section"><div class="stats-section-title">Muscle balance</div><div class="stats-card">
-      <div class="bar-row"><div class="bar-lbl">Upper</div><div class="bar-track"><div class="bar-fill" style="width:${Math.round(upperCount/maxBal*100)}%;background:var(--blue)"></div></div><div class="bar-val">${upperCount}</div></div>
-      <div class="bar-row"><div class="bar-lbl">Lower</div><div class="bar-track"><div class="bar-fill" style="width:${Math.round(lowerCount/maxBal*100)}%;background:var(--green)"></div></div><div class="bar-val">${lowerCount}</div></div>
+    const targetPer=period==='week'?2:8;
+    const upperLabel=`Upper A+B · target ${targetPer}`;
+    const lowerLabel=`Lower A+B · target ${targetPer}`;
+    html+=`<div class="stats-section"><div class="stats-section-title">Session split</div><div class="stats-card">
+      <div class="bar-row"><div class="bar-lbl" style="min-width:44px;font-size:11px">Upper</div><div class="bar-track"><div class="bar-fill" style="width:${Math.round(upperCount/maxBal*100)}%;background:var(--blue)"></div></div><div class="bar-val">${upperCount}<span style="font-size:10px;color:var(--text3)">/${targetPer}</span></div></div>
+      <div class="bar-row"><div class="bar-lbl" style="min-width:44px;font-size:11px">Lower</div><div class="bar-track"><div class="bar-fill" style="width:${Math.round(lowerCount/maxBal*100)}%;background:var(--green)"></div></div><div class="bar-val">${lowerCount}<span style="font-size:10px;color:var(--text3)">/${targetPer}</span></div></div>
+      <div style="padding:6px 14px 10px;font-size:11px;color:var(--text3)">How many upper vs lower sessions completed. Target is ${targetPer} each per ${period==='week'?'week':'month'}.</div>
     </div></div>`;
   }
   if(period==='week'){
