@@ -387,14 +387,14 @@ const PLANS={
   ]},
   Sat:{label:'Lower B — Core Power',type:'lower_b',met:4.0,duration:65,exercises:[
     {name:'Recumbent Bike',target:'5 min warm-up · Level 4',sets:1,opts:[5],def:5,isMinutes:true,tip:'Level 4. Back supported. Warm-up before medicine ball work.'},
-    {name:'Plank (forearm)',target:'3 × 40 sec',sets:3,opts:[25,30,35,40,45],def:40,isTime:true,tip:'Hardest plank of the week — this is 5 sec longer than Wednesday. Neutral spine.'},
-    {name:'Med Ball Overhead Press (explosive)',target:'4 × 10 · 9kg · OUTDOORS',sets:4,opts:[8,10,12],def:10,isWeighted:true,defaultKg:9,tip:'Take ball outside — replaces slam. Press forcefully overhead, catch and lower. Same full-body chain as slam. Silent.'},
-    {name:'Med Ball Russian Twist',target:'4 × 15/side · 9kg',sets:4,opts:[10,12,15],def:15,tip:'Feet off floor throughout. This is the harder Saturday version — 4 sets vs 3 on Wednesday.'},
-    {name:'Med Ball Squat & Press (controlled)',target:'3 × 12 · 9kg',sets:3,opts:[8,10,12],def:12,isWeighted:true,defaultKg:9,tip:'Slower tempo than the explosive press above. Squat down, press as you stand. One fluid movement.'},
-    {name:'Goblet Squat',target:'4 × 14 · 9kg',sets:4,opts:[10,12,14],def:14,isWeighted:true,defaultKg:9,tip:'Lower than Wednesday. Full depth — thighs parallel or below. 9kg med ball.'},
-    {name:'Med Ball Lunge + Rotation',target:'3 × 12/leg · 9kg',sets:3,opts:[8,10,12],def:12,isWeighted:true,defaultKg:9,tip:'Step into lunge, rotate ball toward front knee. Torso upright. Controlled rotation — replaces walking lunges.'},
+    {name:'Plank (forearm)',target:'3 × 40 sec',sets:3,opts:[25,30,35,40,45],def:40,isTime:true,tip:'Hardest plank of the week — 5 sec longer than Wednesday. Neutral spine.'},
+    {name:'Med Ball Russian Twist',target:'4 × 15/side · 9kg',sets:4,opts:[10,12,15],def:15,isWeighted:true,defaultKg:9,tip:'Pure core — no leg load. 9kg is correct here. Feet off floor throughout. 4 sets, harder than Wednesday.'},
+    {name:'Med Ball Dead Bug',target:'3 × 8/side · 9kg',sets:3,opts:[6,8,10],def:8,isWeighted:true,defaultKg:9,tip:'Core only — no leg load. 9kg correct here. Hold ball extended overhead. Back flat always.'},
+    {name:'Goblet Squat',target:'4 × 14 · 9kg',sets:4,opts:[10,12,14],def:14,isWeighted:true,defaultKg:9,tip:'Legs now — after core warm-up, not before. Lower than Wednesday. 9kg held at chest. Full depth.'},
     {name:'Leg Press Machine',target:'3 × 15',sets:3,opts:[12,15,20],def:15,tip:'Moderate weight. Feet shoulder-width on plate. Do not lock knees at the top.'},
-    {name:'Med Ball Dead Bug',target:'3 × 8/side · 9kg',sets:3,opts:[6,8,10],def:8,isWeighted:true,defaultKg:9,tip:'Hold ball extended overhead throughout. Hardest Dead Bug variation — back flat on floor always.'},
+    {name:'Med Ball Lunge + Rotation',target:'3 × 12/leg · 4–5kg',sets:3,opts:[8,10,12],def:12,isWeighted:true,defaultKg:4,tip:'USE LIGHTER BALL (4–5kg) — rotation on fatigued legs. Step into lunge, rotate ball toward front knee. Torso upright.'},
+    {name:'Med Ball Overhead Press (explosive)',target:'4 × 10 · 4–5kg · OUTDOORS',sets:4,opts:[8,10,12],def:10,isWeighted:true,defaultKg:4,tip:'USE LIGHTER BALL (4–5kg) — overhead pressing needs shoulder stability not yet built with 9kg. Outdoors, silent. Explosive press up, controlled catch.'},
+    {name:'Med Ball Squat & Press (controlled)',target:'3 × 12 · 4–5kg',sets:3,opts:[8,10,12],def:12,isWeighted:true,defaultKg:4,tip:'USE LIGHTER BALL (4–5kg) — overhead component. Slower tempo finisher. Squat down, press as you stand.'},
     {name:'Elliptical',target:'5 min cool-down · Level 3',sets:1,opts:[5],def:5,isMinutes:true,tip:'Level 3. Cool-down.'},
   ]},
 };
@@ -460,8 +460,9 @@ function renderKcalFact(kcal,id){
 
 let S={today:new Date(),sessions:[],streak:0,activeSession:null,exIdx:0,pickerSel:null,pickerDur:45,lastSessionData:null};
 function fmtDate(d){const dt=typeof d==='string'?new Date(d+'T00:00:00'):d;return `${String(dt.getDate()).padStart(2,'0')}-${MONTHS[dt.getMonth()]}-${dt.getFullYear()}`;}
-function todayISO(){return S.today.toISOString().split('T')[0];}
-function dateISO(d){return(typeof d==='string'?new Date(d+'T00:00:00'):d).toISOString().split('T')[0];}
+function localISO(d){const dt=d||new Date();return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;}
+function todayISO(){return localISO(S.today);}
+function dateISO(d){const dt=typeof d==='string'?new Date(d+'T00:00:00'):d;return localISO(dt);}
 function calcKcal(met,min){return Math.round(met*WEIGHT_KG*(min/60));}
 function greet(){const h=S.today.getHours();return h<12?'Good morning':h<17?'Good afternoon':'Good evening';}
 
