@@ -675,16 +675,27 @@ function renderHome(){
   S.today=new Date();
   const dow=S.today.getDay(),dayKey={1:'Mon',3:'Wed',4:'Thu',6:'Sat'}[dow];
   const plan=dayKey?PLANS[dayKey]:null;
-  const todaySess=S.sessions.find(s=>dateISO(s.session_date)===todayISO());
+  // Group all sessions by date
+  const sessionsByDate={};
+  S.sessions.forEach(s=>{
+    const dk=dateISO(s.session_date);
+    if(!sessionsByDate[dk])sessionsByDate[dk]=[];
+    sessionsByDate[dk].push(s);
+  });
+  const todaySessions=sessionsByDate[todayISO()]||[];
+  const todaySess=todaySessions[0]||null;
+  const todayKcal=todaySessions.reduce((a,s)=>a+Math.round(s.calories_kcal||0),0);
   const mon=new Date(S.today);mon.setDate(S.today.getDate()-((S.today.getDay()+6)%7));mon.setHours(0,0,0,0);
-  const thisWeek=S.sessions.filter(s=>new Date(s.session_date+'T00:00:00')>=mon).length;
-  const todayKcal=todaySess?Math.round(todaySess.calories_kcal||0):0;
+  // Count unique days this week, not individual session rows
+  const thisWeekDays=new Set(S.sessions.filter(s=>new Date(s.session_date+'T00:00:00')>=mon).map(s=>dateISO(s.session_date))).size;
+  // Count unique days ever logged
+  const totalDays=Object.keys(sessionsByDate).length;
   document.getElementById('home-title').textContent=greet();
   document.getElementById('home-sub').textContent=fmtDate(S.today);
   document.getElementById('streak-num').textContent=S.streak;
   document.getElementById('streak-sub').textContent=S.streak>0?`${S.streak} day${S.streak>1?'s':''} in a row`:'Start your streak today!';
-  document.getElementById('stat-total').textContent=S.sessions.length;
-  document.getElementById('stat-week').textContent=thisWeek;
+  document.getElementById('stat-total').textContent=totalDays;
+  document.getElementById('stat-week').textContent=thisWeekDays;
   document.getElementById('stat-kcal').textContent=todayKcal||'–';
   const factArea=document.getElementById('home-fact-area');
   if(todayKcal>20){factArea.innerHTML=`<div class="kcal-fact" id="home-kcal-fact"></div>`;renderKcalFact(todayKcal,'home-kcal-fact');}
@@ -695,22 +706,29 @@ function renderHome(){
   for(let i=0;i<7;i++){
     const d=new Date(mon2);d.setDate(mon2.getDate()+i);
     const dk=dateISO(d),isToday=dk===todayISO();
-    const sess=S.sessions.find(s=>dateISO(s.session_date)===dk);
-    const done=!!sess;
+    const daySessions=sessionsByDate[dk]||[];
+    const done=daySessions.length>0;
     const isGymDay=gymDays.has(d.getDay());
     const label=['M','T','W','T','F','S','S'][i];
     const cls=done?'wd wd-done':isToday?'wd wd-today':isGymDay?'wd wd-gym':'wd wd-rest';
-    const sessId=sess?`data-sessid="${sess.id}"`:'';
-    wr.innerHTML+=`<div class="wc" onclick="showDayDetail('${dk}')" style="cursor:pointer"><div class="${cls}" ${sessId}>${done?'✓':label}</div><div class="wl">${DAYS_SH[d.getDay()]}</div></div>`;
+    wr.innerHTML+=`<div class="wc" onclick="showDayDetail('${dk}')" style="cursor:pointer"><div class="${cls}">${done?'✓':label}</div><div class="wl">${DAYS_SH[d.getDay()]}</div></div>`;
   }
   const planArea=document.getElementById('home-plan-area'),btnsArea=document.getElementById('home-btns');
-  if(plan&&!todaySess){
+  if(todaySessions.length>0){
+    // Show all today's activities stacked
+    const sessionCards=todaySessions.map(s=>{
+      const label=s.workout_label||s.workout_type||'Activity';
+      const kcal=Math.round(s.calories_kcal||0);
+      const dur=s.duration_min||0;
+      const pillCls=s.workout_category==='gym'?'pill-blue':'pill-gray';
+      return`<div style="display:flex;align-items:center;padding:8px 16px;border-bottom:.5px solid var(--bg);gap:8px"><div style="flex:1"><div style="font-size:13px;font-weight:600">${label}</div><div style="font-size:11px;color:var(--text2);margin-top:1px">${dur}m · ${kcal} kcal</div></div><span class="pill ${pillCls}">${label.toUpperCase().substring(0,12)}</span></div>`;
+    }).join('');
+    planArea.innerHTML=`<div class="today-card" onclick="showDayDetail('${todayISO()}')" style="cursor:pointer"><div class="tc-head"><div><div class="tc-title">${todaySessions.length>1?todaySessions.length+' activities logged ✓':'Session logged ✓'}</div><div class="tc-sub">Tap to see exercises · ${todayKcal} kcal total</div></div><span class="pill pill-green">DONE</span></div>${sessionCards}</div>`;
+    btnsArea.innerHTML=`<button class="btn-secondary" onclick="switchTab('picker')">Log another activity</button>`;
+  }else if(plan){
     const exRows=plan.exercises.map(ex=>`<div class="ex-row"><div class="ex-dot"></div><div class="ex-name">${ex.name}</div><div class="ex-sets">${ex.isMinutes?ex.def+' min':ex.isTime?ex.def+'s':ex.sets+'×'+ex.def}</div></div>`).join('');
     planArea.innerHTML=`<div class="today-card"><div class="tc-head"><div><div class="tc-title">${plan.label}</div><div class="tc-sub">${plan.exercises.length} exercises · ~${plan.duration} min</div></div><span class="pill pill-blue">TODAY</span></div>${exRows}</div>`;
     btnsArea.innerHTML=`<button class="btn-primary" onclick="startGymSession('${dayKey}')">Start ${plan.label}</button><button class="btn-secondary" onclick="switchTab('picker')">Log different activity</button>`;
-  }else if(todaySess){
-    planArea.innerHTML=`<div class="today-card"><div class="tc-head"><div><div class="tc-title">Session logged ✓</div><div class="tc-sub">${todaySess.workout_label||todaySess.workout_type} · ${Math.round(todaySess.calories_kcal||0)} kcal</div></div><span class="pill pill-green">DONE</span></div></div>`;
-    btnsArea.innerHTML=`<button class="btn-secondary" onclick="switchTab('picker')">Log another activity</button>`;
   }else{
     planArea.innerHTML='';
     btnsArea.innerHTML=`<button class="btn-primary" onclick="switchTab('picker')">Log today's activity</button>`;
@@ -1016,19 +1034,20 @@ let audioArmed=false;
 function armAudio(){
   if(!audioArmed){
     audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-    // Play a silent node immediately to satisfy iOS interaction requirement
-    const buf=audioCtx.createBuffer(1,1,22050);
-    const src=audioCtx.createBufferSource();
-    src.buffer=buf;src.connect(audioCtx.destination);src.start(0);
     audioArmed=true;
-    // Update button to show armed state
+    // Update button to armed state first so playBeep check passes
     const btn=document.getElementById('audio-arm-btn');
     if(btn){btn.style.background='var(--gdim)';btn.style.borderColor='var(--green)';}
     const waves=document.getElementById('audio-waves');
     if(waves){waves.setAttribute('stroke','var(--green)');}
     const icon=document.getElementById('audio-arm-icon');
     if(icon){icon.setAttribute('stroke','var(--green)');}
-    showToast('Audio armed — beep will sound at hold end');
+    // Play an audible test beep — user hears it = audio will work
+    audioCtx.resume().then(()=>{
+      playBeep(880,0.15,0.8,'square');
+      setTimeout(()=>playBeep(1100,0.15,0.8,'square'),180);
+    });
+    showToast('Audio armed — heard the beep? ✓');
   }else{
     audioArmed=false;
     const btn=document.getElementById('audio-arm-btn');
@@ -1041,30 +1060,45 @@ function armAudio(){
   }
 }
 
-function playBeep(freq=880,dur=0.18,vol=0.6,type='sine'){
+function playBeep(freq=880,dur=0.2,vol=0.9,type='square'){
   if(!audioArmed||!audioCtx)return;
   try{
-    const osc=audioCtx.createOscillator();
-    const gain=audioCtx.createGain();
-    osc.connect(gain);gain.connect(audioCtx.destination);
-    osc.type=type;osc.frequency.value=freq;
-    gain.gain.setValueAtTime(vol,audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
-    osc.start(audioCtx.currentTime);osc.stop(audioCtx.currentTime+dur);
+    // Resume context — iOS suspends it aggressively between interactions
+    const doPlay=()=>{
+      const osc=audioCtx.createOscillator();
+      const gain=audioCtx.createGain();
+      osc.connect(gain);gain.connect(audioCtx.destination);
+      osc.type=type;
+      osc.frequency.value=freq;
+      gain.gain.setValueAtTime(vol,audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime+dur+0.05);
+    };
+    if(audioCtx.state==='suspended'){
+      audioCtx.resume().then(doPlay).catch(()=>{});
+    }else{
+      doPlay();
+    }
   }catch(e){}
 }
 
+function playTick(){
+  // Short high click — clock tick feel
+  playBeep(1200,0.04,0.7,'square');
+}
+
 function playWarningBeep(){
-  // Two short mid-tone beeps at 10s warning
-  playBeep(660,0.1,0.4);
-  setTimeout(()=>playBeep(660,0.1,0.4),160);
+  // Two sharp beeps at 10s — attention signal
+  playBeep(880,0.1,0.9,'square');
+  setTimeout(()=>playBeep(880,0.1,0.9,'square'),200);
 }
 
 function playDoneBeep(){
-  // Three ascending tones — hold complete
-  playBeep(660,0.15,0.6);
-  setTimeout(()=>playBeep(880,0.15,0.6),180);
-  setTimeout(()=>playBeep(1100,0.25,0.7),360);
+  // Three loud ascending tones — unmistakable completion signal
+  playBeep(660,0.18,0.9,'square');
+  setTimeout(()=>playBeep(880,0.18,0.9,'square'),220);
+  setTimeout(()=>playBeep(1100,0.3,1.0,'square'),440);
 }
 
 // ── Hold timer ────────────────────────────────────────────────────────────
@@ -1093,6 +1127,11 @@ function startHoldTimer(totalSecs,setIdx){
       if(remaining===10){
         if(navigator.vibrate)navigator.vibrate(80);
         playWarningBeep();
+      }
+      // Tick countdown: 5, 4, 3, 2, 1
+      if(remaining>=1&&remaining<=5){
+        playTick();
+        if(navigator.vibrate)navigator.vibrate(30);
       }
       renderHoldTimer(remaining,totalSecs);
     }
@@ -1245,18 +1284,44 @@ function finishSession(){
 }
 
 function renderHistory(){
-  document.getElementById('hist-sub').textContent=`${S.sessions.length} sessions logged`;
+  document.getElementById('hist-sub').textContent=`${Object.keys(S.sessions.reduce((a,s)=>{a[dateISO(s.session_date)]=1;return a},{})).length} days logged`;
   if(!S.sessions.length){document.getElementById('hist-list').innerHTML='<div style="padding:20px;color:var(--text2);text-align:center;font-size:14px">No sessions yet</div>';return;}
-  const pillCls={push:'pill-blue',pull:'pill-green',legs:'pill-amber',custom:'pill-gray',walk:'pill-gray'};
+  // Group by date — newest first
+  const byDate={};
+  S.sessions.forEach(s=>{
+    const dk=dateISO(s.session_date);
+    if(!byDate[dk])byDate[dk]=[];
+    byDate[dk].push(s);
+  });
+  const sortedDates=Object.keys(byDate).sort().reverse();
+  const pillCls={upper_a:'pill-blue',upper_b:'pill-blue',lower_a:'pill-green',lower_b:'pill-green',push:'pill-blue',pull:'pill-green',legs:'pill-amber',custom:'pill-gray',walk:'pill-gray',elliptical:'pill-gray',jog:'pill-gray','recumbent bike':'pill-gray','brisk walk':'pill-gray',stretching:'pill-gray'};
   let html='',lastMonth='';
-  for(const s of S.sessions){
-    const d=new Date(s.session_date+'T00:00:00');
+  for(const dk of sortedDates){
+    const sessions=byDate[dk];
+    const d=new Date(dk+'T00:00:00');
     const mk=`${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
     if(mk!==lastMonth){html+=`<div class="month-sep">${mk}</div>`;lastMonth=mk;}
-    const pc=pillCls[s.workout_type]||'pill-gray';
-    const mismatch=s.off_plan?`<div style="font-size:10px;color:var(--amber);margin-top:2px;font-weight:600">${s.planned_day} plan · logged on ${s.logged_day}</div>`:'';
-    const statsRow=(s.total_sets||0)>0?`<div class="hc-stats"><div class="hs"><div class="hsv">${s.total_sets}</div><div class="hsl">Sets</div></div><div class="hs"><div class="hsv">${s.total_reps}</div><div class="hsl">Reps</div></div><div class="hs"><div class="hsv" style="color:var(--amber)">${Math.round(s.calories_kcal||0)}</div><div class="hsl">Kcal</div></div><div class="hs"><div class="hsv">${s.duration_min||0}m</div><div class="hsl">Duration</div></div></div>`:`<div class="hc-stats"><div class="hs"><div class="hsv" style="color:var(--amber)">${Math.round(s.calories_kcal||0)}</div><div class="hsl">Kcal</div></div><div class="hs"><div class="hsv">${s.duration_min||0}m</div><div class="hsl">Duration</div></div></div>`;
-    html+=`<div class="hcard"><div class="hc-head"><div><div class="hc-date">${fmtDate(d)}</div><div class="hc-type">${s.workout_label||s.workout_type}${mismatch}</div></div><span class="pill ${pc}">${(s.workout_label||s.workout_type||'').toUpperCase()}</span></div>${statsRow}</div>`;
+    const totalKcal=sessions.reduce((a,s)=>a+Math.round(s.calories_kcal||0),0);
+    const totalDur=sessions.reduce((a,s)=>a+(s.duration_min||0),0);
+    const totalSets=sessions.reduce((a,s)=>a+(s.total_sets||0),0);
+    const gymSess=sessions.filter(s=>s.workout_category==='gym');
+    const otherSess=sessions.filter(s=>s.workout_category!=='gym');
+    // Primary label — gym session takes priority
+    const primary=gymSess[0]||sessions[0];
+    const pc=pillCls[primary.workout_type]||'pill-gray';
+    const primaryLabel=primary.workout_label||primary.workout_type||'Activity';
+    // Secondary activities on same day
+    const extras=sessions.slice(1);
+    const extrasHtml=extras.map(s=>{
+      const lbl=s.workout_label||s.workout_type||'Activity';
+      const pc2=pillCls[s.workout_type]||'pill-gray';
+      return`<div style="display:flex;align-items:center;padding:6px 16px;border-top:.5px solid var(--bg);gap:8px"><div style="font-size:11px;color:var(--text2);flex:1">+ ${lbl} · ${s.duration_min||0}m · ${Math.round(s.calories_kcal||0)} kcal</div><span class="pill ${pc2}" style="font-size:9px">${lbl.toUpperCase().substring(0,10)}</span></div>`;
+    }).join('');
+    const statsRow=totalSets>0
+      ?`<div class="hc-stats"><div class="hs"><div class="hsv">${totalSets}</div><div class="hsl">Sets</div></div><div class="hs"><div class="hsv" style="color:var(--amber)">${totalKcal}</div><div class="hsl">Kcal</div></div><div class="hs"><div class="hsv">${totalDur}m</div><div class="hsl">Time</div></div><div class="hs"><div class="hsv" style="color:var(--text3);font-size:11px">tap</div><div class="hsl">Details</div></div></div>`
+      :`<div class="hc-stats"><div class="hs"><div class="hsv" style="color:var(--amber)">${totalKcal}</div><div class="hsl">Kcal</div></div><div class="hs"><div class="hsv">${totalDur}m</div><div class="hsl">Time</div></div><div class="hs"><div class="hsv" style="color:var(--text3);font-size:11px">tap</div><div class="hsl">Details</div></div></div>`;
+    const mismatch=primary.off_plan?`<div style="font-size:10px;color:var(--amber);margin-top:2px;font-weight:600">${primary.planned_day} plan · logged on ${primary.logged_day}</div>`:'';
+    html+=`<div class="hcard" onclick="showDayDetail('${dk}')" style="cursor:pointer"><div class="hc-head"><div><div class="hc-date">${fmtDate(d)}</div><div class="hc-type">${primaryLabel}${sessions.length>1?` + ${sessions.length-1} more`:''} ${mismatch}</div></div><span class="pill ${pc}">${primaryLabel.toUpperCase().substring(0,12)}</span></div>${statsRow}${extrasHtml}</div>`;
   }
   document.getElementById('hist-list').innerHTML=html;
 }
@@ -1317,8 +1382,8 @@ async function showDayDetail(dateStr){
   document.getElementById('ddm-title').textContent=`${dayName}, ${fmtDate(dt)}${isToday?' · Today':''}`;
   document.getElementById('ddm-body').innerHTML='<div style="padding:16px 0;color:var(--text2);font-size:14px">Loading…</div>';
   modal.style.display='flex';
-  const sess=S.sessions.find(s=>dateISO(s.session_date)===dateStr);
-  if(isFuture&&!sess){
+  const daySessions=S.sessions.filter(s=>dateISO(s.session_date)===dateStr);
+  if(isFuture&&!daySessions.length){
     const gymDays={1:'Mon',3:'Wed',4:'Thu',6:'Sat'};
     const dk=gymDays[dt.getDay()];
     const plan=dk?PLANS[dk]:null;
@@ -1330,55 +1395,77 @@ async function showDayDetail(dateStr){
     }
     return;
   }
-  if(!sess){
+  if(!daySessions.length){
     const gymDays={1:'Mon',3:'Wed',4:'Thu',6:'Sat'};
     const dk=gymDays[dt.getDay()];
     const wasGymDay=!!dk;
     document.getElementById('ddm-body').innerHTML=wasGymDay
-      ?`<div style="padding:20px 0;text-align:center"><div style="font-size:32px;margin-bottom:8px">😴</div><div style="font-size:14px;color:var(--text2)">No session logged</div><div style="font-size:12px;color:var(--text3);margin-top:4px">This was a scheduled ${PLANS[dk]?.label||''} day</div></div>`
-      :`<div style="padding:20px 0;text-align:center;color:var(--text3);font-size:14px">Rest day — no session expected</div>`;
+      ?`<div style="padding:20px 0;text-align:center"><div style="font-size:32px;margin-bottom:8px">😴</div><div style="font-size:14px;color:var(--text2)">No session logged</div><div style="font-size:12px;color:var(--text3);margin-top:4px">Scheduled: ${PLANS[dk]?.label||''}</div></div>`
+      :`<div style="padding:20px 0;text-align:center;color:var(--text3);font-size:14px">Rest day</div>`;
     return;
   }
-  // Load set details from DB
-  let setDetail='';
-  try{
-    const{data:sets}=await db.from('set_logs').select('*').eq('session_id',sess.id).order('exercise_name').order('set_number');
-    if(sets&&sets.length){
-      const byEx={};
-      sets.forEach(r=>{if(!byEx[r.exercise_name])byEx[r.exercise_name]=[];byEx[r.exercise_name].push(r);});
-      const rows=Object.entries(byEx).map(([exName,exSets])=>{
-        const setsStr=exSets.map(s=>{
-          if(s.is_time)return`${s.reps}s`;
-          return s.weight_kg?`${s.reps}×${s.weight_kg}kg`:`${s.reps} reps`;
-        }).join(' · ');
-        return`<div class="ex-row"><div class="ex-dot" style="background:var(--blue)"></div><div class="ex-name" style="font-size:13px">${exName}</div><div class="ex-sets" style="font-size:11px;color:var(--text2)">${setsStr}</div></div>`;
-      }).join('');
-      setDetail=`<div style="margin-top:10px;background:#fff;border:.5px solid var(--border);border-radius:14px;overflow:hidden">${rows}</div>`;
+  // Build detail for each session of the day
+  let bodyHtml='';
+  // Day totals bar
+  const totalKcal=daySessions.reduce((a,s)=>a+Math.round(s.calories_kcal||0),0);
+  const totalDur=daySessions.reduce((a,s)=>a+(s.duration_min||0),0);
+  const totalSets=daySessions.reduce((a,s)=>a+(s.total_sets||0),0);
+  bodyHtml+=`<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px">
+    <div style="background:#fff;border:.5px solid var(--border);border-radius:12px;padding:10px 12px;text-align:center"><div style="font-size:18px;font-weight:800;color:var(--blue)">${totalSets||'–'}</div><div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;margin-top:2px">Sets</div></div>
+    <div style="background:#fff;border:.5px solid var(--border);border-radius:12px;padding:10px 12px;text-align:center"><div style="font-size:18px;font-weight:800;color:var(--amber)">${totalKcal}</div><div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;margin-top:2px">Kcal</div></div>
+    <div style="background:#fff;border:.5px solid var(--border);border-radius:12px;padding:10px 12px;text-align:center"><div style="font-size:18px;font-weight:800;color:var(--text)">${totalDur}m</div><div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;margin-top:2px">Time</div></div>
+  </div>`;
+  // Per-session blocks
+  for(const sess of daySessions){
+    const sessLabel=sess.workout_label||sess.workout_type||'Activity';
+    const pillCls=sess.workout_category==='gym'?'pill-blue':'pill-gray';
+    bodyHtml+=`<div style="margin-top:12px;background:#fff;border:.5px solid var(--border);border-radius:14px;overflow:hidden">
+      <div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;background:var(--bg)">
+        <div style="font-size:13px;font-weight:700">${sessLabel}</div>
+        <div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text2)">${sess.duration_min||0}m · ${Math.round(sess.calories_kcal||0)} kcal</span><span class="pill ${pillCls}">${sessLabel.substring(0,10).toUpperCase()}</span></div>
+      </div>`;
+    if(sess.workout_category==='gym'){
+      // Load set_logs for this session
+      try{
+        const{data:sets}=await db.from('set_logs').select('*').eq('session_id',sess.id).order('set_number');
+        // Get planned exercises for this session type to detect skipped ones
+        const planKey=Object.keys(PLANS).find(k=>PLANS[k].type===sess.workout_type);
+        const plannedExercises=planKey?PLANS[planKey].exercises:[];
+        const loggedNames=new Set((sets||[]).map(r=>r.exercise_name));
+        if(sets&&sets.length){
+          // Group by exercise preserving order — use planned order if available
+          const byEx={};
+          sets.forEach(r=>{if(!byEx[r.exercise_name])byEx[r.exercise_name]=[];byEx[r.exercise_name].push(r);});
+          // Order: planned exercises first (in plan order), then any extras
+          const orderedNames=plannedExercises.filter(e=>loggedNames.has(e.name)).map(e=>e.name);
+          const extraNames=Object.keys(byEx).filter(n=>!orderedNames.includes(n));
+          const allNames=[...orderedNames,...extraNames];
+          allNames.forEach(exName=>{
+            const exSets=byEx[exName];
+            const setsStr=exSets.map(s=>s.is_time?`${s.reps}s`:s.weight_kg?`${s.reps}×${s.weight_kg}kg`:`${s.reps}`).join(' · ');
+            bodyHtml+=`<div class="ex-row"><div class="ex-dot" style="background:var(--green)"></div><div class="ex-name" style="font-size:13px">${exName}</div><div class="ex-sets" style="font-size:11px;color:var(--text2)">${setsStr}</div></div>`;
+          });
+          // Show skipped exercises from plan
+          const skipped=plannedExercises.filter(e=>!loggedNames.has(e.name)&&!e.isMinutes);
+          if(skipped.length){
+            bodyHtml+=`<div style="padding:6px 16px 4px;font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;background:var(--bg);margin-top:2px">Skipped</div>`;
+            skipped.forEach(e=>{
+              bodyHtml+=`<div class="ex-row" style="opacity:.45"><div class="ex-dot"></div><div class="ex-name" style="font-size:13px;text-decoration:line-through;color:var(--text2)">${e.name}</div><div class="ex-sets" style="font-size:11px;color:var(--text3)">${e.sets}×${e.def}</div></div>`;
+            });
+          }
+        }else{
+          bodyHtml+=`<div style="padding:10px 16px;font-size:12px;color:var(--text3)">No exercise detail logged</div>`;
+        }
+      }catch(e){
+        bodyHtml+=`<div style="padding:10px 16px;font-size:12px;color:var(--text3)">Could not load exercises</div>`;
+      }
+      if(sess.off_plan){
+        bodyHtml+=`<div style="padding:6px 14px 8px;font-size:11px;color:var(--amber)">Logged on ${sess.logged_day} — planned for ${sess.planned_day}</div>`;
+      }
     }
-  }catch(e){}
-  const cleanKcal=Math.round(sess.calories_kcal||0);
-  const cleanDur=sess.duration_min||0;
-  document.getElementById('ddm-body').innerHTML=`
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px">
-      <div style="background:#fff;border:.5px solid var(--border);border-radius:12px;padding:10px 12px;text-align:center">
-        <div style="font-size:18px;font-weight:800;color:var(--blue)">${sess.total_sets||0}</div>
-        <div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;margin-top:2px">Sets</div>
-      </div>
-      <div style="background:#fff;border:.5px solid var(--border);border-radius:12px;padding:10px 12px;text-align:center">
-        <div style="font-size:18px;font-weight:800;color:var(--amber)">${cleanKcal}</div>
-        <div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;margin-top:2px">Kcal</div>
-      </div>
-      <div style="background:#fff;border:.5px solid var(--border);border-radius:12px;padding:10px 12px;text-align:center">
-        <div style="font-size:18px;font-weight:800;color:var(--text)">${cleanDur}m</div>
-        <div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;margin-top:2px">Time</div>
-      </div>
-    </div>
-    <div style="margin-top:10px;background:#fff;border:.5px solid var(--border);border-radius:12px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
-      <div style="font-size:13px;font-weight:600">${sess.workout_label||sess.workout_type}</div>
-      <span class="pill ${sess.workout_category==='gym'?'pill-blue':'pill-gray'}">${(sess.workout_label||sess.workout_type||'').toUpperCase()}</span>
-    </div>
-    ${setDetail}
-    ${sess.off_plan?`<div style="margin-top:8px;padding:8px 12px;background:var(--adim);border-radius:10px;font-size:12px;color:var(--amber)">Logged on ${sess.logged_day} — planned for ${sess.planned_day}</div>`:''}`;
+    bodyHtml+=`</div>`;
+  }
+  document.getElementById('ddm-body').innerHTML=bodyHtml;
 }
 
 async function fixCorruptedSessions(){
