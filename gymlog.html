@@ -1010,22 +1010,47 @@ function logSet(i){
 let restTimerInterval=null;
 function startRestTimer(secs){
   clearInterval(restTimerInterval);
+  acquireWakeLock();
+  // Schedule all rest timer sounds up front
+  scheduleRestSounds(secs);
   let remaining=secs;
   renderRestTimer(remaining,secs);
   restTimerInterval=setInterval(()=>{
     remaining--;
     if(remaining<=0){
       clearInterval(restTimerInterval);
+      releaseWakeLock();
       if(navigator.vibrate)navigator.vibrate([100,50,100]);
       renderExercise();
     }else{
       if(remaining===10&&navigator.vibrate)navigator.vibrate(50);
+      if(remaining<=5&&navigator.vibrate)navigator.vibrate(25);
       renderRestTimer(remaining,secs);
     }
   },1000);
 }
 
-function dismissTimer(){clearInterval(restTimerInterval);renderExercise();}
+function dismissTimer(){clearInterval(restTimerInterval);releaseWakeLock();renderExercise();}
+
+// ── Wake Lock ─────────────────────────────────────────────────────────────
+let wakeLock=null;
+async function acquireWakeLock(){
+  try{
+    if('wakeLock'in navigator){
+      wakeLock=await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release',()=>{wakeLock=null;});
+    }
+  }catch(e){}
+}
+function releaseWakeLock(){
+  if(wakeLock){wakeLock.release().catch(()=>{});wakeLock=null;}
+}
+// Re-acquire if page becomes visible again (background release)
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&(holdTimerInterval||restTimerInterval)){
+    acquireWakeLock();
+  }
+});
 
 // ── Audio ──────────────────────────────────────────────────────────────────
 let audioCtx=null;
@@ -1033,20 +1058,20 @@ let audioArmed=false;
 
 function armAudio(){
   if(!audioArmed){
+    // Must create AND resume AudioContext directly in tap handler
     audioCtx=new(window.AudioContext||window.webkitAudioContext)();
     audioArmed=true;
-    // Update button to armed state first so playBeep check passes
     const btn=document.getElementById('audio-arm-btn');
     if(btn){btn.style.background='var(--gdim)';btn.style.borderColor='var(--green)';}
     const waves=document.getElementById('audio-waves');
     if(waves){waves.setAttribute('stroke','var(--green)');}
     const icon=document.getElementById('audio-arm-icon');
     if(icon){icon.setAttribute('stroke','var(--green)');}
-    // Play an audible test beep — user hears it = audio will work
+    // Resume then play test beep — scheduled via audio clock, reliable
     audioCtx.resume().then(()=>{
-      playBeep(880,0.15,0.8,'square');
-      setTimeout(()=>playBeep(1100,0.15,0.8,'square'),180);
-    });
+      scheduleBeep(audioCtx.currentTime+0.05,880,0.15,0.8);
+      scheduleBeep(audioCtx.currentTime+0.28,1100,0.15,0.8);
+    }).catch(()=>{});
     showToast('Audio armed — heard the beep? ✓');
   }else{
     audioArmed=false;
@@ -1060,46 +1085,67 @@ function armAudio(){
   }
 }
 
-function playBeep(freq=880,dur=0.2,vol=0.9,type='square'){
+// Core scheduling function — uses Web Audio clock, fires regardless of iOS gesture policy
+function scheduleBeep(atTime,freq=880,dur=0.18,vol=0.9,type='square'){
   if(!audioArmed||!audioCtx)return;
   try{
-    // Resume context — iOS suspends it aggressively between interactions
-    const doPlay=()=>{
-      const osc=audioCtx.createOscillator();
-      const gain=audioCtx.createGain();
-      osc.connect(gain);gain.connect(audioCtx.destination);
-      osc.type=type;
-      osc.frequency.value=freq;
-      gain.gain.setValueAtTime(vol,audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
-      osc.start(audioCtx.currentTime);
-      osc.stop(audioCtx.currentTime+dur+0.05);
-    };
-    if(audioCtx.state==='suspended'){
-      audioCtx.resume().then(doPlay).catch(()=>{});
-    }else{
-      doPlay();
-    }
+    const osc=audioCtx.createOscillator();
+    const gain=audioCtx.createGain();
+    osc.connect(gain);gain.connect(audioCtx.destination);
+    osc.type=type;
+    osc.frequency.value=freq;
+    gain.gain.setValueAtTime(0,atTime);
+    gain.gain.linearRampToValueAtTime(vol,atTime+0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001,atTime+dur);
+    osc.start(atTime);
+    osc.stop(atTime+dur+0.05);
   }catch(e){}
 }
 
-function playTick(){
-  // Short high click — clock tick feel
-  playBeep(1200,0.04,0.7,'square');
+// Schedule all sounds for a countdown at once — called when timer starts
+// totalSecs: full duration, warningAt: seconds remaining when warning fires
+function scheduleTimerSounds(totalSecs,warningAt=10,tickFrom=5){
+  if(!audioArmed||!audioCtx)return;
+  const now=audioCtx.currentTime+0.1; // small offset to ensure context is running
+  // Warning beep
+  const warnOffset=totalSecs-warningAt;
+  if(warnOffset>0){
+    scheduleBeep(now+warnOffset,880,0.1,0.9);
+    scheduleBeep(now+warnOffset+0.22,880,0.1,0.9);
+  }
+  // Tick countdown
+  for(let t=tickFrom;t>=1;t--){
+    const offset=totalSecs-t;
+    if(offset>0){
+      scheduleBeep(now+offset,1200,0.04,0.7);
+    }
+  }
+  // Done signal at end
+  scheduleBeep(now+totalSecs,660,0.2,0.9);
+  scheduleBeep(now+totalSecs+0.24,880,0.2,0.9);
+  scheduleBeep(now+totalSecs+0.48,1100,0.28,1.0);
 }
 
-function playWarningBeep(){
-  // Two sharp beeps at 10s — attention signal
-  playBeep(880,0.1,0.9,'square');
-  setTimeout(()=>playBeep(880,0.1,0.9,'square'),200);
+// Scheduled rest timer sounds (shorter: just done beep + 5s ticks)
+function scheduleRestSounds(totalSecs){
+  if(!audioArmed||!audioCtx)return;
+  const now=audioCtx.currentTime+0.1;
+  // Single beep at 10s if timer is long enough
+  if(totalSecs>15){
+    scheduleBeep(now+(totalSecs-10),660,0.12,0.7);
+  }
+  // Ticks for last 5 seconds
+  for(let t=5;t>=1;t--){
+    const offset=totalSecs-t;
+    if(offset>0) scheduleBeep(now+offset,1000,0.05,0.6);
+  }
+  // Done — two ascending tones
+  scheduleBeep(now+totalSecs,880,0.18,0.9);
+  scheduleBeep(now+totalSecs+0.22,1100,0.22,0.9);
 }
 
-function playDoneBeep(){
-  // Three loud ascending tones — unmistakable completion signal
-  playBeep(660,0.18,0.9,'square');
-  setTimeout(()=>playBeep(880,0.18,0.9,'square'),220);
-  setTimeout(()=>playBeep(1100,0.3,1.0,'square'),440);
-}
+// Keep a reference to cancel scheduled sounds if timer is dismissed early
+let scheduledSoundNodes=[];
 
 // ── Hold timer ────────────────────────────────────────────────────────────
 let holdTimerInterval=null;
@@ -1107,15 +1153,17 @@ let holdTimerInterval=null;
 function startHoldTimer(totalSecs,setIdx){
   clearInterval(holdTimerInterval);
   clearInterval(restTimerInterval);
+  acquireWakeLock();
+  // Schedule ALL sounds up front via audio clock — works even when iOS suspends context later
+  scheduleTimerSounds(totalSecs);
   let remaining=totalSecs;
   renderHoldTimer(remaining,totalSecs);
   holdTimerInterval=setInterval(()=>{
     remaining--;
     if(remaining<=0){
       clearInterval(holdTimerInterval);
+      releaseWakeLock();
       if(navigator.vibrate)navigator.vibrate([150,80,150,80,200]);
-      playDoneBeep();
-      // Auto-log the set with the hold duration
       S.activeSession.log[S.exIdx][setIdx]=totalSecs;
       persistSession();
       const allComplete=S.activeSession.plan.exercises.every((_,idx)=>S.activeSession.log[idx].every(s=>s!==null));
@@ -1124,15 +1172,8 @@ function startHoldTimer(totalSecs,setIdx){
       if(!allDone){startRestTimer(60);}
       else{renderExercise();}
     }else{
-      if(remaining===10){
-        if(navigator.vibrate)navigator.vibrate(80);
-        playWarningBeep();
-      }
-      // Tick countdown: 5, 4, 3, 2, 1
-      if(remaining>=1&&remaining<=5){
-        playTick();
-        if(navigator.vibrate)navigator.vibrate(30);
-      }
+      if(remaining===10&&navigator.vibrate)navigator.vibrate(80);
+      if(remaining<=5&&navigator.vibrate)navigator.vibrate(30);
       renderHoldTimer(remaining,totalSecs);
     }
   },1000);
@@ -1140,6 +1181,7 @@ function startHoldTimer(totalSecs,setIdx){
 
 function cancelHold(){
   clearInterval(holdTimerInterval);
+  releaseWakeLock();
   renderExercise();
 }
 
@@ -1275,6 +1317,7 @@ function finishSession(){
   document.getElementById('done').classList.remove('show');
   S.activeSession=null;
   audioArmed=false;
+  releaseWakeLock();
   clearInterval(holdTimerInterval);
   clearInterval(restTimerInterval);
   localStorage.removeItem('gymlog_active_session');
