@@ -1069,10 +1069,12 @@ function armAudio(){
     if(icon){icon.setAttribute('stroke','var(--green)');}
     // Resume then play test beep — scheduled via audio clock, reliable
     audioCtx.resume().then(()=>{
-      scheduleBeep(audioCtx.currentTime+0.05,880,0.15,0.8);
-      scheduleBeep(audioCtx.currentTime+0.28,1100,0.15,0.8);
-    }).catch(()=>{});
-    showToast('Audio armed — heard the beep? ✓');
+      scheduleBeep(audioCtx.currentTime+0.05,880,0.15,0.85);
+      scheduleBeep(audioCtx.currentTime+0.28,1100,0.15,0.85);
+      showToast(`Audio armed ✓ (${audioCtx.state}) — heard the beep?`);
+    }).catch(e=>{
+      showToast('Audio arm failed: '+e.message);
+    });
   }else{
     audioArmed=false;
     const btn=document.getElementById('audio-arm-btn');
@@ -1094,58 +1096,57 @@ function scheduleBeep(atTime,freq=880,dur=0.18,vol=0.9,type='square'){
     osc.connect(gain);gain.connect(audioCtx.destination);
     osc.type=type;
     osc.frequency.value=freq;
-    gain.gain.setValueAtTime(0,atTime);
-    gain.gain.linearRampToValueAtTime(vol,atTime+0.01);
-    gain.gain.exponentialRampToValueAtTime(0.001,atTime+dur);
+    // Set gain from currentTime (not atTime) to avoid silent-drop on past-scheduled nodes
+    const safeNow=audioCtx.currentTime;
+    gain.gain.setValueAtTime(0,safeNow);
+    gain.gain.setValueAtTime(vol,atTime);
+    gain.gain.exponentialRampToValueAtTime(0.001,atTime+Math.max(dur,0.05));
     osc.start(atTime);
-    osc.stop(atTime+dur+0.05);
+    osc.stop(atTime+dur+0.1);
   }catch(e){}
 }
 
-// Schedule all sounds for a countdown at once — called when timer starts
-// totalSecs: full duration, warningAt: seconds remaining when warning fires
 function scheduleTimerSounds(totalSecs,warningAt=10,tickFrom=5){
   if(!audioArmed||!audioCtx)return;
-  const now=audioCtx.currentTime+0.1; // small offset to ensure context is running
-  // Warning beep
-  const warnOffset=totalSecs-warningAt;
-  if(warnOffset>0){
-    scheduleBeep(now+warnOffset,880,0.1,0.9);
-    scheduleBeep(now+warnOffset+0.22,880,0.1,0.9);
-  }
-  // Tick countdown
-  for(let t=tickFrom;t>=1;t--){
-    const offset=totalSecs-t;
-    if(offset>0){
-      scheduleBeep(now+offset,1200,0.04,0.7);
+  // Always resume before scheduling — context may have been suspended since arming
+  audioCtx.resume().then(()=>{
+    const now=audioCtx.currentTime+0.15;
+    // Warning beep
+    const warnOffset=totalSecs-warningAt;
+    if(warnOffset>0){
+      scheduleBeep(now+warnOffset,880,0.12,0.9);
+      scheduleBeep(now+warnOffset+0.25,880,0.12,0.9);
     }
-  }
-  // Done signal at end
-  scheduleBeep(now+totalSecs,660,0.2,0.9);
-  scheduleBeep(now+totalSecs+0.24,880,0.2,0.9);
-  scheduleBeep(now+totalSecs+0.48,1100,0.28,1.0);
+    // Tick countdown 5→1
+    for(let t=tickFrom;t>=1;t--){
+      const offset=totalSecs-t;
+      if(offset>0) scheduleBeep(now+offset,1200,0.06,0.8);
+    }
+    // Done signal
+    scheduleBeep(now+totalSecs+0.05,660,0.22,0.95);
+    scheduleBeep(now+totalSecs+0.30,880,0.22,0.95);
+    scheduleBeep(now+totalSecs+0.55,1100,0.3,1.0);
+  }).catch(()=>{});
 }
 
-// Scheduled rest timer sounds (shorter: just done beep + 5s ticks)
 function scheduleRestSounds(totalSecs){
   if(!audioArmed||!audioCtx)return;
-  const now=audioCtx.currentTime+0.1;
-  // Single beep at 10s if timer is long enough
-  if(totalSecs>15){
-    scheduleBeep(now+(totalSecs-10),660,0.12,0.7);
-  }
-  // Ticks for last 5 seconds
-  for(let t=5;t>=1;t--){
-    const offset=totalSecs-t;
-    if(offset>0) scheduleBeep(now+offset,1000,0.05,0.6);
-  }
-  // Done — two ascending tones
-  scheduleBeep(now+totalSecs,880,0.18,0.9);
-  scheduleBeep(now+totalSecs+0.22,1100,0.22,0.9);
+  audioCtx.resume().then(()=>{
+    const now=audioCtx.currentTime+0.15;
+    // Warning at 10s if timer is long enough
+    if(totalSecs>15){
+      scheduleBeep(now+(totalSecs-10),660,0.14,0.8);
+    }
+    // Ticks for last 5 seconds
+    for(let t=5;t>=1;t--){
+      const offset=totalSecs-t;
+      if(offset>0) scheduleBeep(now+offset,1000,0.06,0.7);
+    }
+    // Done
+    scheduleBeep(now+totalSecs+0.05,880,0.2,0.95);
+    scheduleBeep(now+totalSecs+0.28,1100,0.24,0.95);
+  }).catch(()=>{});
 }
-
-// Keep a reference to cancel scheduled sounds if timer is dismissed early
-let scheduledSoundNodes=[];
 
 // ── Hold timer ────────────────────────────────────────────────────────────
 let holdTimerInterval=null;
