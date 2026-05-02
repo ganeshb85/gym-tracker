@@ -974,7 +974,7 @@ function renderExercise(){
   const lastHint=last&&!ex.isMinutes?`<div class="po-hint">Last session: ${last.weight_kg!=null?last.weight_kg+'kg × ':''}${last.reps}${ex.isTime?'s':' reps'} — try${last.weight_kg!=null?' '+(Math.round((last.weight_kg+0.5)*10)/10)+'kg or':''} +1 rep today</div>`:'';
   const logLabel=curWt!=null&&isWeighted?`Log set · ${selVal}${ex.isTime?'s':ex.isMinutes?' min':' reps'} @ ${curWt}kg`:`Log set · ${selVal}${ex.isTime?'s':ex.isMinutes?' min':' reps'}`;
   const actionBtn=allDone
-    ?`<button class="log-btn nxt" onclick="nextEx()">${isLastEx?'Finish workout ✓':'Next exercise →'}</button>`
+    ?`<div style="display:flex;flex-direction:column;gap:8px"><button class="log-btn nxt" onclick="nextEx()">${isLastEx?'Finish workout ✓':'Next exercise →'}</button><button class="log-btn" style="background:var(--bg);color:var(--text2);border:.5px solid var(--border2)" onclick="startRestTimer(60)">Rest 60s before next</button></div>`
     :ex.isTime
       ?`<button class="log-btn" style="background:var(--amber)" onclick="startHoldTimer(${selVal},${nextP})">Start hold · ${selVal}s</button><button class="skip-lnk" onclick="nextEx()">Skip exercise</button>`
       :`<button class="log-btn" onclick="logSet(${nextP})">${logLabel}</button><button class="skip-lnk" onclick="nextEx()">Skip exercise</button>`;
@@ -1047,18 +1047,23 @@ function releaseWakeLock(){
 }
 // Re-acquire if page becomes visible again (background release)
 document.addEventListener('visibilitychange',()=>{
-  if(document.visibilityState==='visible'&&(holdTimerInterval||restTimerInterval)){
-    acquireWakeLock();
+  if(document.visibilityState==='visible'){
+    if(holdTimerInterval||restTimerInterval) acquireWakeLock();
+    if(audioArmed&&audioCtx){
+      audioCtx.resume().then(()=>{
+        startKeepAlive();
+      }).catch(()=>{});
+    }
   }
 });
 
 // ── Audio ──────────────────────────────────────────────────────────────────
 let audioCtx=null;
 let audioArmed=false;
+let keepAliveNode=null;
 
 function armAudio(){
   if(!audioArmed){
-    // Must create AND resume AudioContext directly in tap handler
     audioCtx=new(window.AudioContext||window.webkitAudioContext)();
     audioArmed=true;
     const btn=document.getElementById('audio-arm-btn');
@@ -1067,16 +1072,15 @@ function armAudio(){
     if(waves){waves.setAttribute('stroke','var(--green)');}
     const icon=document.getElementById('audio-arm-icon');
     if(icon){icon.setAttribute('stroke','var(--green)');}
-    // Resume then play test beep — scheduled via audio clock, reliable
     audioCtx.resume().then(()=>{
-      scheduleBeep(audioCtx.currentTime+0.05,880,0.15,0.85);
-      scheduleBeep(audioCtx.currentTime+0.28,1100,0.15,0.85);
-      showToast(`Audio armed ✓ (${audioCtx.state}) — heard the beep?`);
-    }).catch(e=>{
-      showToast('Audio arm failed: '+e.message);
-    });
+      startKeepAlive();
+      playNow(880,0.15,0.85);
+      setTimeout(()=>playNow(1100,0.15,0.85),200);
+      showToast('Audio armed ✓ ('+audioCtx.state+') — heard the beep?');
+    }).catch(e=>{showToast('Audio arm failed: '+e.message);});
   }else{
     audioArmed=false;
+    stopKeepAlive();
     const btn=document.getElementById('audio-arm-btn');
     if(btn){btn.style.background='#fff';btn.style.borderColor='var(--border)';}
     const waves=document.getElementById('audio-waves');
@@ -1087,67 +1091,84 @@ function armAudio(){
   }
 }
 
-// Core scheduling function — uses Web Audio clock, fires regardless of iOS gesture policy
+function startKeepAlive(){
+  stopKeepAlive();
+  if(!audioCtx)return;
+  try{
+    const osc=audioCtx.createOscillator();
+    const gain=audioCtx.createGain();
+    gain.gain.value=0.00001;
+    osc.connect(gain);gain.connect(audioCtx.destination);
+    osc.frequency.value=1;osc.start();
+    keepAliveNode={osc,gain};
+  }catch(e){}
+}
+
+function stopKeepAlive(){
+  if(keepAliveNode){try{keepAliveNode.osc.stop();}catch(e){}keepAliveNode=null;}
+}
+
+// Play immediately at currentTime+tiny_offset — no future scheduling
+function playNow(freq=880,dur=0.18,vol=0.9,type='square'){
+  if(!audioArmed||!audioCtx)return;
+  try{
+    if(audioCtx.state!=='running')return;
+    const osc=audioCtx.createOscillator();
+    const gain=audioCtx.createGain();
+    osc.connect(gain);gain.connect(audioCtx.destination);
+    osc.type=type;osc.frequency.value=freq;
+    const t=audioCtx.currentTime+0.01;
+    gain.gain.setValueAtTime(vol,t);
+    gain.gain.exponentialRampToValueAtTime(0.001,t+dur);
+    osc.start(t);osc.stop(t+dur+0.05);
+  }catch(e){}
+}
+
+// Schedule ahead — countdown ticks and end signals
 function scheduleBeep(atTime,freq=880,dur=0.18,vol=0.9,type='square'){
   if(!audioArmed||!audioCtx)return;
   try{
     const osc=audioCtx.createOscillator();
     const gain=audioCtx.createGain();
     osc.connect(gain);gain.connect(audioCtx.destination);
-    osc.type=type;
-    osc.frequency.value=freq;
-    // Set gain from currentTime (not atTime) to avoid silent-drop on past-scheduled nodes
+    osc.type=type;osc.frequency.value=freq;
     const safeNow=audioCtx.currentTime;
+    const safeAt=Math.max(atTime,safeNow+0.01);
     gain.gain.setValueAtTime(0,safeNow);
-    gain.gain.setValueAtTime(vol,atTime);
-    gain.gain.exponentialRampToValueAtTime(0.001,atTime+Math.max(dur,0.05));
-    osc.start(atTime);
-    osc.stop(atTime+dur+0.1);
+    gain.gain.setValueAtTime(vol,safeAt);
+    gain.gain.exponentialRampToValueAtTime(0.001,safeAt+Math.max(dur,0.05));
+    osc.start(safeAt);osc.stop(safeAt+dur+0.1);
   }catch(e){}
 }
 
 function scheduleTimerSounds(totalSecs,warningAt=10,tickFrom=5){
   if(!audioArmed||!audioCtx)return;
-  // Always resume before scheduling — context may have been suspended since arming
-  audioCtx.resume().then(()=>{
-    const now=audioCtx.currentTime+0.15;
-    // Warning beep
-    const warnOffset=totalSecs-warningAt;
-    if(warnOffset>0){
-      scheduleBeep(now+warnOffset,880,0.12,0.9);
-      scheduleBeep(now+warnOffset+0.25,880,0.12,0.9);
-    }
-    // Tick countdown 5→1
-    for(let t=tickFrom;t>=1;t--){
-      const offset=totalSecs-t;
-      if(offset>0) scheduleBeep(now+offset,1200,0.06,0.8);
-    }
-    // Done signal
-    scheduleBeep(now+totalSecs+0.05,660,0.22,0.95);
-    scheduleBeep(now+totalSecs+0.30,880,0.22,0.95);
-    scheduleBeep(now+totalSecs+0.55,1100,0.3,1.0);
-  }).catch(()=>{});
+  const now=audioCtx.currentTime+0.15;
+  const warnOffset=totalSecs-warningAt;
+  if(warnOffset>0){
+    scheduleBeep(now+warnOffset,880,0.12,0.9);
+    scheduleBeep(now+warnOffset+0.25,880,0.12,0.9);
+  }
+  for(let t=tickFrom;t>=1;t--){
+    const offset=totalSecs-t;
+    if(offset>0) scheduleBeep(now+offset,1200,0.08,0.9);
+  }
+  scheduleBeep(now+totalSecs+0.05,660,0.22,0.95);
+  scheduleBeep(now+totalSecs+0.30,880,0.22,0.95);
+  scheduleBeep(now+totalSecs+0.55,1100,0.3,1.0);
 }
 
 function scheduleRestSounds(totalSecs){
   if(!audioArmed||!audioCtx)return;
-  audioCtx.resume().then(()=>{
-    const now=audioCtx.currentTime+0.15;
-    // Warning at 10s if timer is long enough
-    if(totalSecs>15){
-      scheduleBeep(now+(totalSecs-10),660,0.14,0.8);
-    }
-    // Ticks for last 5 seconds
-    for(let t=5;t>=1;t--){
-      const offset=totalSecs-t;
-      if(offset>0) scheduleBeep(now+offset,1000,0.06,0.7);
-    }
-    // Done
-    scheduleBeep(now+totalSecs+0.05,880,0.2,0.95);
-    scheduleBeep(now+totalSecs+0.28,1100,0.24,0.95);
-  }).catch(()=>{});
+  const now=audioCtx.currentTime+0.15;
+  if(totalSecs>15) scheduleBeep(now+(totalSecs-10),660,0.14,0.8);
+  for(let t=5;t>=1;t--){
+    const offset=totalSecs-t;
+    if(offset>0) scheduleBeep(now+offset,1000,0.08,0.8);
+  }
+  scheduleBeep(now+totalSecs+0.05,880,0.2,0.95);
+  scheduleBeep(now+totalSecs+0.28,1100,0.24,0.95);
 }
-
 // ── Hold timer ────────────────────────────────────────────────────────────
 let holdTimerInterval=null;
 
@@ -1318,6 +1339,7 @@ function finishSession(){
   document.getElementById('done').classList.remove('show');
   S.activeSession=null;
   audioArmed=false;
+  stopKeepAlive();
   releaseWakeLock();
   clearInterval(holdTimerInterval);
   clearInterval(restTimerInterval);
